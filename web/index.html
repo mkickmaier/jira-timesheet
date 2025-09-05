@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jira Timesheet</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 0; background: #f6f7f9; }
+    header { background: #0747a6; color: white; padding: 1px 16px; }
+    main { padding: 16px; max-width: 1000px; margin: 0 auto; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    select, input, button, textarea { padding: 8px; font-size: 14px; }
+    .card { background: white; border-radius: 8px; padding: 12px; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+    .muted { color: #666; }
+    .right { text-align: right; }
+    .danger { color: #b71c1c; }
+    .day-header { background: #f0f4ff; font-weight: 600; }
+    .day-header .right { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Jira Timesheet</h2>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row">
+        <label>Issue</label>
+        <select id="issue" aria-busy="false"></select>
+        <span id="issueStatus" class="muted" aria-live="polite"></span>
+        <label>Date</label>
+        <input type="date" id="date">
+        <label>Start</label>
+        <input type="time" id="start" step="60" value="09:00">
+        <label>Duration</label>
+        <input type="text" id="duration" placeholder="e.g. 1h 30m or 90m or 1.5h" value="1h">
+        <button id="add">Log</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h3 style="margin:0">Worklogs</h3>
+        <div class="row" aria-label="Week navigation">
+          <button id="prevWeek" title="Previous week" aria-label="Previous week">◀</button>
+          <input type="date" id="viewDate" aria-label="Any date within the week">
+          <button id="nextWeek" title="Next week" aria-label="Next week">▶</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Issue</th>
+            <th>When</th>
+            <th>Duration</th>
+            <th class="right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="logs"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const issueSelect = document.getElementById('issue');
+    const dateInput = document.getElementById('date');
+    const startInput = document.getElementById('start');
+    const durationInput = document.getElementById('duration');
+    const addBtn = document.getElementById('add');
+    const logsTbody = document.getElementById('logs');
+    const issueStatus = document.getElementById('issueStatus');
+    const viewDateInput = document.getElementById('viewDate');
+    const prevWeekBtn = document.getElementById('prevWeek');
+    const nextWeekBtn = document.getElementById('nextWeek');
+
+    function toJiraStarted(dateStr, timeStr) {
+      // returns timezone offset, e.g., +0200
+      const [h, m] = timeStr.split(':').map(Number);
+      const d = new Date(dateStr + 'T' + timeStr + ':00');
+      const pad = n => String(n).padStart(2, '0');
+      const tz = -d.getTimezoneOffset();
+      const sign = tz >= 0 ? '+' : '-';
+      const abs = Math.abs(tz);
+      const tzStr = sign + pad(Math.floor(abs / 60)) + pad(abs % 60);
+      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(h) + ':' + pad(m) + ':00.000' + tzStr;
+    }
+
+    async function loadIssues() {
+      try {
+        issueSelect.disabled = true;
+        addBtn.disabled = true;
+        issueSelect.setAttribute('aria-busy','true');
+        if (issueStatus) issueStatus.textContent = 'Loading issues…';
+        const res = await fetch('/api/issues');
+        if (!res.ok) {
+          const err = await res.json().catch(()=>({}));
+          const msg = err.error || err.message || (err.errorMessages && err.errorMessages.join(', ')) || `HTTP ${res.status}`;
+          if (issueStatus) issueStatus.textContent = `Failed to load issues: ${msg}`;
+          throw new Error(msg);
+        }
+        const issues = await res.json();
+        issueSelect.innerHTML = '';
+        issues.forEach(i => {
+          const opt = document.createElement('option');
+          opt.value = i.id;
+          opt.textContent = `${i.key} — ${i.summary}`;
+          issueSelect.appendChild(opt);
+        });
+        if (issues.length === 0) {
+          if (issueStatus) issueStatus.textContent = 'No issues found.';
+        } else {
+          if (issueStatus) {
+            issueStatus.textContent = `Loaded ${issues.length} issues`;
+            setTimeout(() => { if (issueStatus.textContent.startsWith('Loaded')) issueStatus.textContent = ''; }, 1200);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        // Keep existing options if any; otherwise leave empty
+      } finally {
+        issueSelect.disabled = false;
+        addBtn.disabled = false;
+        issueSelect.setAttribute('aria-busy','false');
+      }
+    }
+
+    function getTodayISODate() {
+      const d = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+    }
+
+    function isSameDay(a, b) {
+      return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+    }
+
+    async function loadTodayWorklogs() {
+      // Backward compatibility wrapper to load worklogs for the selected viewDate
+      return loadWorklogsForSelectedDay();
+    }
+
+    async function loadWorklogsForSelectedDay() {
+      // Deprecated in favor of weekly view; keep as shim
+      return loadWorklogsForSelectedWeek();
+    }
+
+    function getMonday(d) {
+      const date = new Date(d);
+      const day = date.getDay(); // 0=Sun,1=Mon,...
+      const diff = (day === 0 ? -6 : 1) - day; // shift to Monday
+      date.setDate(date.getDate() + diff);
+      date.setHours(0,0,0,0);
+      return date;
+    }
+
+    function formatISODate(d) {
+      const pad = n => String(n).padStart(2,'0');
+      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+    }
+
+    async function loadAllIssues() {
+      if (issueStatus) issueStatus.textContent = 'Loading issues…';
+      try {
+        const res = await fetch('/api/issues');
+        if (!res.ok) {
+          const err = await res.json().catch(()=>({}));
+          const msg = err.error || err.message || (err.errorMessages && err.errorMessages.join(', ')) || `HTTP ${res.status}`;
+          if (issueStatus) issueStatus.textContent = `Failed to load issues: ${msg}`;
+          throw new Error(msg);
+        }
+        const issues = await res.json();
+        // keep the loading indicator until callers finish their flows; they can clear it explicitly
+        return issues;
+      } catch (e) {
+        console.error(e);
+        throw e;
+      }
+    }
+
+    async function loadWorklogsForSelectedWeek() {
+      logsTbody.innerHTML = '';
+      // show loading row while fetching issues/worklogs
+      const loadingTr = document.createElement('tr');
+      loadingTr.innerHTML = '<td colspan="4" class="muted">Loading worklogs…</td>';
+      logsTbody.appendChild(loadingTr);
+      let allIssues;
+      try {
+        allIssues = await loadAllIssues();
+      } catch (e) {
+        logsTbody.innerHTML = '<tr><td colspan="4" class="danger">Cannot load worklogs because issues failed to load. Check server configuration and network.</td></tr>';
+        // in case of error, keep the error message in issueStatus
+        return;
+      }
+      // issues successfully loaded; update status to more stable message and clear it after a short delay to avoid flicker
+      if (issueStatus) {
+        const count = Array.isArray(allIssues) ? allIssues.length : 0;
+        issueStatus.textContent = `Loaded ${count} issues`;
+        setTimeout(() => { if (issueStatus.textContent.startsWith('Loaded')) issueStatus.textContent = ''; }, 1200);
+      }
+      logsTbody.innerHTML = '';
+      const refDate = new Date(viewDateInput.value || getTodayISODate());
+      const monday = getMonday(refDate);
+      const weekDays = Array.from({length:7}, (_,i)=>{
+        const d = new Date(monday);
+        d.setDate(monday.getDate()+i);
+        return d;
+      });
+
+      // Fetch worklogs per issue and group by day
+      const dayGroups = weekDays.map(d => ({ date: new Date(d), logs: [] }));
+
+      for (const issue of allIssues) {
+        const res = await fetch(`/api/issues/${issue.id}/worklogs`);
+        const list = await res.json();
+        list.forEach(w => {
+          const started = new Date(w.started);
+          for (let i=0;i<7;i++) {
+            if (isSameDay(started, weekDays[i])) {
+              dayGroups[i].logs.push({ ...w, issueId: issue.id, issueKey: issue.key });
+              break;
+            }
+          }
+        });
+      }
+
+      // Render rows, ensuring a full week Mon-Sun with a header per day showing totals
+      const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      for (let i=0;i<7;i++) {
+        const group = dayGroups[i];
+        // compute total minutes for the day
+        const totalMinutes = group.logs.reduce((sum, w)=> sum + Math.round((w.timeSpentSeconds||0)/60), 0);
+        // Day header row
+        const headerTr = document.createElement('tr');
+        headerTr.className = 'day-header';
+        headerTr.innerHTML = `<td colspan="3">${dayNames[i]} ${formatISODate(group.date)}</td><td class="right">${formatMinutesAsHHMM(totalMinutes)}</td>`;
+        logsTbody.appendChild(headerTr);
+
+        if (group.logs.length === 0) {
+          const emptyTr = document.createElement('tr');
+          emptyTr.innerHTML = `<td colspan="4" class="muted">No worklogs</td>`;
+          logsTbody.appendChild(emptyTr);
+          continue;
+        }
+        // For groups with logs, render a row per log
+        group.logs.sort((a,b)=> new Date(a.started)-new Date(b.started));
+        group.logs.forEach((w) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${w.issueKey}</td>
+            <td>${new Date(w.started).toLocaleString()}</td>
+            <td>${formatMinutesAsHHMM(Math.round((w.timeSpentSeconds||0)/60))}</td>
+            <td class="right">
+              <button data-act="edit">Edit</button>
+              <button data-act="delete" class="danger">Delete</button>
+            </td>`;
+          const issueId = w.issueId;
+          tr.querySelector('[data-act="edit"]').onclick = () => startEdit(issueId, w, tr);
+          tr.querySelector('[data-act="delete"]').onclick = async () => {
+            if (!confirm('Delete this worklog?')) return;
+            const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, { method: 'DELETE' });
+            if (resp.status===204) tr.remove();
+            else alert('Failed to delete');
+          };
+          logsTbody.appendChild(tr);
+        });
+      }
+    }
+
+    // Legacy single-row renderer (unused in weekly view)
+    function addRow(issueId, w) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]}</td>
+        <td>${new Date(w.started).toLocaleString()}</td>
+        <td>${formatMinutesAsHHMM(Math.round((w.timeSpentSeconds||0)/60))}</td>
+        <td class="right">
+          <button data-act="edit">Edit</button>
+          <button data-act="delete" class="danger">Delete</button>
+        </td>`;
+      tr.querySelector('[data-act="edit"]').onclick = () => startEdit(issueId, w, tr);
+      tr.querySelector('[data-act="delete"]').onclick = async () => {
+        if (!confirm('Delete this worklog?')) return;
+        const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, { method: 'DELETE' });
+        if (resp.status===204) tr.remove();
+        else alert('Failed to delete');
+      };
+      logsTbody.appendChild(tr);
+    }
+
+    function getLocalDateTimeParts(iso) {
+      const d = new Date(iso);
+      const pad = n => String(n).padStart(2,'0');
+      return {
+        date: d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()),
+        time: pad(d.getHours()) + ':' + pad(d.getMinutes())
+      };
+    }
+
+    function startEdit(issueId, w, tr) {
+      const parts = getLocalDateTimeParts(w.started);
+      const mins = Math.round((w.timeSpentSeconds||0)/60);
+      tr.innerHTML = `
+        <td>${w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]}</td>
+        <td>
+          <input type="date" data-edit="date" value="${parts.date}">
+          <input type="time" data-edit="time" step="60" value="${parts.time}">
+        </td>
+        <td>
+          <input type="text" data-edit="duration" value="${mins}">
+        </td>
+        <td class="right">
+          <button data-act="save">Save</button>
+          <button data-act="cancel" class="danger">Cancel</button>
+        </td>`;
+
+      tr.querySelector('[data-act="cancel"]').onclick = () => {
+        // Reload list to restore original row
+        loadWorklogsForSelectedDay();
+      };
+      tr.querySelector('[data-act="save"]').onclick = async () => {
+        const date = tr.querySelector('[data-edit="date"]').value;
+        const time = tr.querySelector('[data-edit="time"]').value || '00:00';
+        const durationStr = tr.querySelector('[data-edit="duration"]').value;
+        const started = toJiraStarted(date, time);
+        const minutes = parseJiraDurationToMinutes(durationStr);
+        if (!date || !Number.isFinite(minutes) || minutes <= 0) {
+          alert('Enter a valid date and duration (e.g., 1h 30m, 90m, 1.5h, 01:30).');
+          return;
+        }
+        const body = { started, timeSpentSeconds: Math.round(minutes)*60 };
+        const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(()=>({}));
+          alert('Failed to update worklog: ' + (err.errorMessages || err.message || resp.status));
+          return;
+        }
+        await loadWorklogsForSelectedDay();
+      };
+    }
+
+    function formatMinutesAsHHMM(mins) {
+      if (!Number.isFinite(mins)) return '';
+      const h = Math.floor(mins/60);
+      const m = mins % 60;
+      return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+    }
+
+    function parseJiraDurationToMinutes(input) {
+      if (!input) return NaN;
+      const s = String(input).trim().toLowerCase();
+      const hm = s.match(/^([0-9]{1,3}):(\d{2})$/);
+      if (hm) {
+        const h = parseInt(hm[1],10);
+        const m = parseInt(hm[2],10);
+        if (m>=60) return NaN;
+        return h*60 + m;
+      }
+      const re = /([0-9]*\.?[0-9]+)\s*([wdhm])/g;
+      let match; let totalMinutes = 0; let any=false;
+      while ((match = re.exec(s))){
+        any = true;
+        const val = parseFloat(match[1]);
+        const unit = match[2];
+        if (unit==='w') totalMinutes += val*5*8*60;
+        else if (unit==='d') totalMinutes += val*8*60;
+        else if (unit==='h') totalMinutes += val*60;
+        else if (unit==='m') totalMinutes += val;
+      }
+      if (any) return Math.round(totalMinutes);
+      const num = parseFloat(s.replace(',','.'));
+      if (Number.isFinite(num)) return Math.round(num);
+      return NaN;
+    }
+
+
+    addBtn.onclick = async () => {
+      const issueId = issueSelect.value;
+      if (!issueId) return alert('Select an issue');
+      const started = toJiraStarted(dateInput.value, startInput.value);
+      const minutes = parseJiraDurationToMinutes(durationInput.value);
+      if (!Number.isFinite(minutes) || minutes <= 0) return alert('Enter a valid duration (e.g., 1h 30m, 90m, 1.5h, 01:30)');
+      const body = { started, timeSpentSeconds: Math.round(minutes) * 60 };
+      const res = await fetch(`/api/issues/${issueId}/worklogs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!res.ok) {
+        const err = await res.json().catch(()=>({}));
+        alert('Failed to log time: ' + (err.errorMessages || err.message || res.status));
+        return;
+      }
+      await loadTodayWorklogs();
+    };
+
+    function shiftViewWeeks(weeks) {
+      const d = new Date(viewDateInput.value || getTodayISODate());
+      d.setDate(d.getDate() + weeks*7);
+      const pad = n => String(n).padStart(2, '0');
+      viewDateInput.value = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+      loadWorklogsForSelectedWeek();
+    }
+
+    (function init() {
+      const today = getTodayISODate();
+      dateInput.value = today; // default for new worklogs
+      viewDateInput.value = today; // default for viewing
+      loadIssues().then(loadWorklogsForSelectedWeek);
+      issueSelect.onchange = loadWorklogsForSelectedWeek; // not strictly needed for "all issues" view, but keep to allow filtering later if desired
+      viewDateInput.onchange = loadWorklogsForSelectedWeek;
+      prevWeekBtn.onclick = () => shiftViewWeeks(-1);
+      nextWeekBtn.onclick = () => shiftViewWeeks(1);
+      // keyboard accessibility for arrows
+      prevWeekBtn.onkeyup = (e) => { if (e.key === 'Enter' || e.key === ' ') shiftViewWeeks(-1); };
+      nextWeekBtn.onkeyup = (e) => { if (e.key === 'Enter' || e.key === ' ') shiftViewWeeks(1); };
+
+      // If issues failed to load, allow retry by clicking the status text
+      if (issueStatus) {
+        issueStatus.style.cursor = 'pointer';
+        issueStatus.title = 'Click to retry loading issues';
+        issueStatus.onclick = () => loadIssues().then(loadWorklogsForSelectedWeek);
+      }
+    })();
+  </script>
+</body>
+</html>
