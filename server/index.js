@@ -179,6 +179,9 @@ app.delete('/api/issues/:issueId/worklogs/:worklogId', async (req, res) => {
   }
 });
 
+// Config endpoint
+app.get('/api/config', (_, res) => res.json({ jiraBaseUrl: JIRA_BASE_URL }));
+
 // Simple health check
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 

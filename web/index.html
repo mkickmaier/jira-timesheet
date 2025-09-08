@@ -29,6 +29,7 @@
       <div class="row">
         <label>Issue</label>
         <select id="issue" aria-busy="false"></select>
+        <a id="issueLink" href="#" target="_blank" rel="noopener noreferrer" title="Open selected issue in Jira" aria-label="Open selected issue in Jira" style="display:none">🔗</a>
         <span id="issueStatus" class="muted" aria-live="polite"></span>
         <label>Date</label>
         <input type="date" id="date">
@@ -44,6 +45,7 @@
       <div class="row" style="justify-content: space-between; align-items: center;">
         <h3 style="margin:0">Worklogs</h3>
         <div class="row" aria-label="Week navigation">
+          <span id="weekNumber" class="muted" title="Calendar week" aria-live="polite" style="min-width:48px;text-align:right"></span>
           <button id="prevWeek" title="Previous week" aria-label="Previous week">◀</button>
           <input type="date" id="viewDate" aria-label="Any date within the week">
           <button id="nextWeek" title="Next week" aria-label="Next week">▶</button>
@@ -68,12 +70,15 @@
     const dateInput = document.getElementById('date');
     const startInput = document.getElementById('start');
     const durationInput = document.getElementById('duration');
+    const issueLink = document.getElementById('issueLink');
     const addBtn = document.getElementById('add');
     const logsTbody = document.getElementById('logs');
     const issueStatus = document.getElementById('issueStatus');
     const viewDateInput = document.getElementById('viewDate');
+    const weekNumberSpan = document.getElementById('weekNumber');
     const prevWeekBtn = document.getElementById('prevWeek');
     const nextWeekBtn = document.getElementById('nextWeek');
+    let jiraBaseUrl = '';
 
     function toJiraStarted(dateStr, timeStr) {
       // returns timezone offset, e.g., +0200
@@ -85,6 +90,38 @@
       const abs = Math.abs(tz);
       const tzStr = sign + pad(Math.floor(abs / 60)) + pad(abs % 60);
       return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(h) + ':' + pad(m) + ':00.000' + tzStr;
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        if (!res.ok) return;
+        const cfg = await res.json();
+        if (cfg && typeof cfg.jiraBaseUrl === 'string') {
+          // normalize: no trailing slash
+          jiraBaseUrl = cfg.jiraBaseUrl.replace(/\/$/, '');
+        }
+      } catch (e) {
+        console.warn('Failed to load config', e);
+      }
+    }
+
+    function updateIssueLink() {
+      try {
+        if (!issueLink) return;
+        const sel = issueSelect.options[issueSelect.selectedIndex];
+        const key = sel?.dataset?.key;
+        if (jiraBaseUrl && key) {
+          issueLink.href = `${jiraBaseUrl}/browse/${key}`;
+          issueLink.style.display = '';
+          issueLink.title = `Open ${key} in Jira`;
+          issueLink.setAttribute('aria-label', `Open ${key} in Jira`);
+        } else {
+          issueLink.style.display = 'none';
+        }
+      } catch {
+        if (issueLink) issueLink.style.display = 'none';
+      }
     }
 
     async function loadIssues() {
@@ -106,8 +143,10 @@
           const opt = document.createElement('option');
           opt.value = i.id;
           opt.textContent = `${i.key} — ${i.summary}`;
+          opt.dataset.key = i.key;
           issueSelect.appendChild(opt);
         });
+        updateIssueLink();
         if (issues.length === 0) {
           if (issueStatus) issueStatus.textContent = 'No issues found.';
         } else {
@@ -153,6 +192,29 @@
       date.setDate(date.getDate() + diff);
       date.setHours(0,0,0,0);
       return date;
+    }
+
+    function getISOWeekNumber(date) {
+      // ISO week: weeks start on Monday, week 1 is the one with Jan 4th
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      // Set to nearest Thursday (current date + 4 - current day number) with Monday=1, Sunday=7
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+      const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      return weekNo;
+    }
+
+    function updateWeekNumberUI() {
+      try {
+        if (!weekNumberSpan) return;
+        const ref = new Date(viewDateInput.value || getTodayISODate());
+        const monday = getMonday(ref);
+        const weekNo = getISOWeekNumber(monday);
+        weekNumberSpan.textContent = `CW ${String(weekNo).padStart(2,'0')}`;
+      } catch (e) {
+        if (weekNumberSpan) weekNumberSpan.textContent = '';
+      }
     }
 
     function formatISODate(d) {
@@ -218,7 +280,7 @@
           const started = new Date(w.started);
           for (let i=0;i<7;i++) {
             if (isSameDay(started, weekDays[i])) {
-              dayGroups[i].logs.push({ ...w, issueId: issue.id, issueKey: issue.key });
+              dayGroups[i].logs.push({ ...w, issueId: issue.id, issueKey: issue.key, issueSummary: issue.summary });
               break;
             }
           }
@@ -247,8 +309,12 @@
         group.logs.sort((a,b)=> new Date(a.started)-new Date(b.started));
         group.logs.forEach((w) => {
           const tr = document.createElement('tr');
+          const sum = (w.issueSummary || '').slice(0,25);
+          const sumSuffix = (w.issueSummary || '').length > 25 ? '…' : '';
+          const issueText = `${w.issueKey}${sum ? ' — ' + sum + sumSuffix : ''}`;
+          const linkHtml = (jiraBaseUrl && w.issueKey) ? ` <a href="${jiraBaseUrl}/browse/${w.issueKey}" target="_blank" rel="noopener noreferrer" aria-label="Open ${w.issueKey} in Jira" title="Open ${w.issueKey} in Jira">🔗</a>` : '';
           tr.innerHTML = `
-            <td>${w.issueKey}</td>
+            <td>${issueText}${linkHtml}</td>
             <td>${new Date(w.started).toLocaleString()}</td>
             <td>${formatMinutesAsHHMM(Math.round((w.timeSpentSeconds||0)/60))}</td>
             <td class="right">
@@ -271,8 +337,13 @@
     // Legacy single-row renderer (unused in weekly view)
     function addRow(issueId, w) {
       const tr = document.createElement('tr');
+      const summary = (w.issueSummary || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[1] || '').slice(0,25);
+      const sumSuffix = (w.issueSummary || '').length > 25 ? '…' : '';
+      const baseKey = (w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]);
+      const issueText = `${baseKey}${summary ? ' — ' + summary + sumSuffix : ''}`;
+      const linkHtml = (jiraBaseUrl && baseKey) ? ` <a href="${jiraBaseUrl}/browse/${baseKey}" target="_blank" rel="noopener noreferrer" aria-label="Open ${baseKey} in Jira" title="Open ${baseKey} in Jira">🔗</a>` : '';
       tr.innerHTML = `
-        <td>${w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]}</td>
+        <td>${issueText}${linkHtml}</td>
         <td>${new Date(w.started).toLocaleString()}</td>
         <td>${formatMinutesAsHHMM(Math.round((w.timeSpentSeconds||0)/60))}</td>
         <td class="right">
@@ -301,8 +372,13 @@
     function startEdit(issueId, w, tr) {
       const parts = getLocalDateTimeParts(w.started);
       const mins = Math.round((w.timeSpentSeconds||0)/60);
+      const summary = (w.issueSummary || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[1] || '').slice(0,25);
+      const sumSuffix = (w.issueSummary || '').length > 25 ? '…' : '';
+      const baseKey = (w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]);
+      const issueText = `${baseKey}${summary ? ' — ' + summary + sumSuffix : ''}`;
+      const linkHtml = (jiraBaseUrl && baseKey) ? ` <a href="${jiraBaseUrl}/browse/${baseKey}" target="_blank" rel="noopener noreferrer" aria-label="Open ${baseKey} in Jira" title="Open ${baseKey} in Jira">🔗</a>` : '';
       tr.innerHTML = `
-        <td>${w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]}</td>
+        <td>${issueText}${linkHtml}</td>
         <td>
           <input type="date" data-edit="date" value="${parts.date}">
           <input type="time" data-edit="time" step="60" value="${parts.time}">
@@ -401,15 +477,16 @@
       const pad = n => String(n).padStart(2, '0');
       viewDateInput.value = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
       loadWorklogsForSelectedWeek();
+      updateWeekNumberUI();
     }
 
     (function init() {
       const today = getTodayISODate();
       dateInput.value = today; // default for new worklogs
       viewDateInput.value = today; // default for viewing
-      loadIssues().then(loadWorklogsForSelectedWeek);
-      issueSelect.onchange = loadWorklogsForSelectedWeek; // not strictly needed for "all issues" view, but keep to allow filtering later if desired
-      viewDateInput.onchange = loadWorklogsForSelectedWeek;
+      loadConfig().then(loadIssues).then(() => { loadWorklogsForSelectedWeek(); updateWeekNumberUI(); updateIssueLink(); });
+      issueSelect.onchange = () => { updateIssueLink(); }; // do not reload when switching issue
+      viewDateInput.onchange = () => { loadWorklogsForSelectedWeek(); updateWeekNumberUI(); };
       prevWeekBtn.onclick = () => shiftViewWeeks(-1);
       nextWeekBtn.onclick = () => shiftViewWeeks(1);
       // keyboard accessibility for arrows
@@ -420,7 +497,7 @@
       if (issueStatus) {
         issueStatus.style.cursor = 'pointer';
         issueStatus.title = 'Click to retry loading issues';
-        issueStatus.onclick = () => loadIssues().then(loadWorklogsForSelectedWeek);
+        issueStatus.onclick = () => loadConfig().then(loadIssues).then(() => { loadWorklogsForSelectedWeek(); updateIssueLink(); });
       }
     })();
   </script>
