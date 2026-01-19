@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PI Capacity Planning</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 0; background: #f6f7f9; }
+    header { background: #0747a6; color: white; padding: 1px 16px; display: flex; align-items: center; justify-content: space-between; }
+    header a { color: white; text-decoration: none; font-weight: bold; }
+    main { padding: 16px; max-width: 1200px; margin: 0 auto; }
+    .card { background: white; border-radius: 8px; padding: 12px; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, button { padding: 8px; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { text-align: left; padding: 10px; border: 1px solid #ddd; }
+    th { background-color: #f0f4ff; }
+    .over-planned { background-color: #ffcccc; color: #b71c1c; font-weight: bold; }
+    .warning-planned { background-color: #fff3cd; color: #856404; font-weight: bold; }
+    .capacity-cell { text-align: center; }
+    .total-row { font-weight: bold; background-color: #f9f9f9; }
+    .loading { font-style: italic; color: #666; }
+    .error { color: #b71c1c; padding: 10px; border: 1px solid #b71c1c; background: #ffeeee; border-radius: 4px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>PI Capacity Planning</h2>
+    <a href="/">Timesheet</a>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row">
+        <label for="piName">PI Name (e.g. 26_04):</label>
+        <input type="text" id="piName" placeholder="PI Name">
+        <button id="loadBtn">Load Capacity</button>
+        <div style="margin-left: 20px; border-left: 1px solid #ccc; padding-left: 20px; display: flex; align-items: center; gap: 8px;">
+          <label for="fileInput" style="cursor: pointer; background: #eee; padding: 8px; border-radius: 4px; border: 1px solid #ccc;">Choose Excel File</label>
+          <input type="file" id="fileInput" accept=".xlsx" style="display: none">
+          <span id="fileNameDisplay" class="muted">No file chosen</span>
+          <button id="uploadBtn">Upload</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="status"></div>
+
+    <div class="card" id="resultsCard" style="display:none">
+      <h3 id="piTitle"></h3>
+      <div style="overflow-x: auto;">
+        <table id="capacityTable">
+          <thead>
+            <tr id="tableHeader">
+              <th>Team Member</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const piNameInput = document.getElementById('piName');
+    const loadBtn = document.getElementById('loadBtn');
+    const fileInput = document.getElementById('fileInput');
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const statusDiv = document.getElementById('status');
+    const resultsCard = document.getElementById('resultsCard');
+    const piTitle = document.getElementById('piTitle');
+    const tableHeader = document.getElementById('tableHeader');
+    const tableBody = document.getElementById('tableBody');
+
+    // Assume 8 hours per day, 5 days per week, 2 weeks per iteration = 80 hours
+    // This is a fallback if no baseline capacity is found in Excel.
+    const DEFAULT_CAPACITY_HOURS = 80; 
+    const DEFAULT_CAPACITY_SECONDS = DEFAULT_CAPACITY_HOURS * 3600;
+
+    function formatTime(seconds) {
+      if (seconds === 0) return '0h';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return `${h}h${m > 0 ? ' ' + m + 'm' : ''}`;
+    }
+
+    function getBaselineCapacity(data, memberName, iteration) {
+      if (data.baselineCapacity && data.baselineCapacity.capacity[memberName]) {
+        return data.baselineCapacity.capacity[memberName][iteration] || 0;
+      }
+      return DEFAULT_CAPACITY_SECONDS;
+    }
+
+    async function loadCapacity() {
+      const pi = piNameInput.value.trim();
+      if (!pi) {
+        statusDiv.innerHTML = '<div class="error">Please enter a PI name.</div>';
+        return;
+      }
+
+      statusDiv.innerHTML = '<div class="loading">Fetching data from Jira...</div>';
+      resultsCard.style.display = 'none';
+
+      try {
+        const res = await fetch(`/api/capacity?pi=${encodeURIComponent(pi)}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          statusDiv.innerHTML = `<div class="error">Error: ${data.error || data.message || 'Failed to fetch'}</div>`;
+          return;
+        }
+
+        if (data.iterations.length === 0) {
+          statusDiv.innerHTML = '<div class="error">No iterations found for this PI.</div>';
+          return;
+        }
+
+        statusDiv.innerHTML = '';
+        renderTable(data);
+      } catch (e) {
+        statusDiv.innerHTML = `<div class="error">Failed to load capacity: ${e.message}</div>`;
+      }
+    }
+
+    function renderTable(data) {
+      piTitle.textContent = `Capacity Planning for PI: ${data.pi}`;
+      
+      // Clear headers except first
+      while (tableHeader.cells.length > 1) {
+        tableHeader.deleteCell(1);
+      }
+      
+      // Add iteration headers
+      data.iterations.forEach(it => {
+        const th = document.createElement('th');
+        th.textContent = it;
+        th.className = 'capacity-cell';
+        tableHeader.appendChild(th);
+      });
+
+      // Total header
+      const totalTh = document.createElement('th');
+      totalTh.textContent = 'Total';
+      totalTh.className = 'capacity-cell';
+      tableHeader.appendChild(totalTh);
+
+      // Render body
+      tableBody.innerHTML = '';
+      data.members.forEach(member => {
+        const tr = document.createElement('tr');
+        
+        const nameTd = document.createElement('td');
+        nameTd.textContent = member.name;
+        tr.appendChild(nameTd);
+
+        let memberTotalPlanned = 0;
+        let memberTotalCapacity = 0;
+        data.iterations.forEach(it => {
+          const plannedSeconds = member.capacity[it] || 0;
+          const capacitySeconds = getBaselineCapacity(data, member.name, it);
+          
+          memberTotalPlanned += plannedSeconds;
+          memberTotalCapacity += capacitySeconds;
+          
+          const td = document.createElement('td');
+          td.className = 'capacity-cell';
+          
+          const planSpan = document.createElement('div');
+          planSpan.textContent = formatTime(plannedSeconds);
+          td.appendChild(planSpan);
+          
+          const capaSpan = document.createElement('div');
+          capaSpan.style.fontSize = '0.8em';
+          capaSpan.style.color = '#666';
+          capaSpan.textContent = `of ${formatTime(capacitySeconds)}`;
+          td.appendChild(capaSpan);
+          
+          // Over-planning detection
+          if (plannedSeconds > capacitySeconds && capacitySeconds > 0) {
+            const overPercent = (plannedSeconds - capacitySeconds) / capacitySeconds;
+            if (overPercent > 0.05) {
+              td.classList.add('over-planned');
+              td.title = `Over-planned by more than 5%! Capacity: ${formatTime(capacitySeconds)}`;
+            } else {
+              td.classList.add('warning-planned');
+              td.title = `Over-planned by up to 5%! Capacity: ${formatTime(capacitySeconds)}`;
+            }
+          }
+          
+          tr.appendChild(td);
+        });
+
+        const totalTd = document.createElement('td');
+        totalTd.className = 'capacity-cell';
+        
+        const totalPlanDiv = document.createElement('div');
+        totalPlanDiv.textContent = formatTime(memberTotalPlanned);
+        totalTd.appendChild(totalPlanDiv);
+        
+        const totalCapaDiv = document.createElement('div');
+        totalCapaDiv.style.fontSize = '0.8em';
+        totalCapaDiv.style.color = '#666';
+        totalCapaDiv.textContent = `of ${formatTime(memberTotalCapacity)}`;
+        totalTd.appendChild(totalCapaDiv);
+
+        if (memberTotalPlanned > memberTotalCapacity && memberTotalCapacity > 0) {
+          const totalOverPercent = (memberTotalPlanned - memberTotalCapacity) / memberTotalCapacity;
+          if (totalOverPercent > 0.05) {
+            totalTd.classList.add('over-planned');
+          } else {
+            totalTd.classList.add('warning-planned');
+          }
+        }
+        tr.appendChild(totalTd);
+
+        tableBody.appendChild(tr);
+      });
+
+      resultsCard.style.display = 'block';
+    }
+
+    async function uploadFile() {
+      const pi = piNameInput.value.trim();
+      if (!pi) {
+        statusDiv.innerHTML = '<div class="error">Please enter a PI name first to identify the file destination.</div>';
+        return;
+      }
+      if (!fileInput.files.length) {
+        statusDiv.innerHTML = '<div class="error">Please choose an Excel file to upload.</div>';
+        return;
+      }
+
+      const file = fileInput.files[0];
+      const formData = new FormData();
+      formData.append('pi', pi);
+      formData.append('file', file);
+
+      statusDiv.innerHTML = '<div class="loading">Uploading file...</div>';
+
+      try {
+        const res = await fetch('/api/capacity/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          statusDiv.innerHTML = `<div class="error">Upload failed: ${data.error || data.message || 'Unknown error'}</div>`;
+          return;
+        }
+
+        statusDiv.innerHTML = `<div style="color: #2e7d32; padding: 10px; border: 1px solid #2e7d32; background: #e8f5e9; border-radius: 4px; margin: 10px 0;">
+          ${data.message}. You can now load the capacity.
+        </div>`;
+      } catch (e) {
+        statusDiv.innerHTML = `<div class="error">Upload error: ${e.message}</div>`;
+      }
+    }
+
+    loadBtn.addEventListener('click', loadCapacity);
+    piNameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') loadCapacity();
+    });
+
+    fileInput.addEventListener('change', () => {
+      fileNameDisplay.textContent = fileInput.files.length ? fileInput.files[0].name : 'No file chosen';
+    });
+    uploadBtn.addEventListener('click', uploadFile);
+  </script>
+</body>
+</html>
