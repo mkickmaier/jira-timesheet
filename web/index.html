@@ -6,7 +6,8 @@
   <title>Jira Timesheet</title>
   <style>
     body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 0; background: #f6f7f9; }
-    header { background: #0747a6; color: white; padding: 1px 16px; }
+    header { background: #0747a6; color: white; padding: 1px 16px; display: flex; align-items: center; justify-content: space-between; }
+    header a { color: white; text-decoration: none; font-weight: bold; }
     main { padding: 16px; max-width: 1000px; margin: 0 auto; }
     .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     select, input, button, textarea { padding: 8px; font-size: 14px; }
@@ -23,6 +24,7 @@
 <body>
   <header>
     <h2>Jira Timesheet</h2>
+    <a href="/capacity.html">Capacity Planning</a>
   </header>
   <main>
     <div class="card">
@@ -79,6 +81,11 @@
     const prevWeekBtn = document.getElementById('prevWeek');
     const nextWeekBtn = document.getElementById('nextWeek');
     let jiraBaseUrl = '';
+
+    // Caching issues and worklogs to avoid refetching everything on every change
+    let cachedIssues = null; // array of issues
+    const worklogCache = new Map(); // issueId -> worklogs[]
+    const invalidatedIssueIds = new Set(); // issueIds whose worklogs must be refreshed
 
     function toJiraStarted(dateStr, timeStr) {
       // returns timezone offset, e.g., +0200
@@ -138,6 +145,7 @@
           throw new Error(msg);
         }
         const issues = await res.json();
+        cachedIssues = issues; // cache issues
         issueSelect.innerHTML = '';
         issues.forEach(i => {
           const opt = document.createElement('option');
@@ -223,6 +231,9 @@
     }
 
     async function loadAllIssues() {
+      if (cachedIssues && Array.isArray(cachedIssues) && cachedIssues.length) {
+        return cachedIssues;
+      }
       if (issueStatus) issueStatus.textContent = 'Loading issues…';
       try {
         const res = await fetch('/api/issues');
@@ -233,6 +244,7 @@
           throw new Error(msg);
         }
         const issues = await res.json();
+        cachedIssues = issues; // cache
         // keep the loading indicator until callers finish their flows; they can clear it explicitly
         return issues;
       } catch (e) {
@@ -274,8 +286,15 @@
       const dayGroups = weekDays.map(d => ({ date: new Date(d), logs: [] }));
 
       for (const issue of allIssues) {
-        const res = await fetch(`/api/issues/${issue.id}/worklogs`);
-        const list = await res.json();
+        let list;
+        // refresh cache if this issue was invalidated or not present
+        if (invalidatedIssueIds.has(issue.id) || !worklogCache.has(issue.id)) {
+          const res = await fetch(`/api/issues/${issue.id}/worklogs`);
+          list = await res.json();
+          worklogCache.set(issue.id, list);
+        } else {
+          list = worklogCache.get(issue.id);
+        }
         list.forEach(w => {
           const started = new Date(w.started);
           for (let i=0;i<7;i++) {
@@ -286,6 +305,8 @@
           }
         });
       }
+      // clear invalidations after refresh
+      invalidatedIssueIds.clear();
 
       // Render rows, ensuring a full week Mon-Sun with a header per day showing totals
       const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -326,8 +347,13 @@
           tr.querySelector('[data-act="delete"]').onclick = async () => {
             if (!confirm('Delete this worklog?')) return;
             const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, { method: 'DELETE' });
-            if (resp.status===204) tr.remove();
-            else alert('Failed to delete');
+            if (!resp.ok && resp.status!==204) {
+              alert('Failed to delete');
+              return;
+            }
+            // mark this issue as invalidated and refresh week using cache for others
+            invalidatedIssueIds.add(issueId);
+            await loadWorklogsForSelectedWeek();
           };
           logsTbody.appendChild(tr);
         });
@@ -354,8 +380,12 @@
       tr.querySelector('[data-act="delete"]').onclick = async () => {
         if (!confirm('Delete this worklog?')) return;
         const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, { method: 'DELETE' });
-        if (resp.status===204) tr.remove();
-        else alert('Failed to delete');
+        if (!resp.ok && resp.status!==204) {
+          alert('Failed to delete');
+          return;
+        }
+        invalidatedIssueIds.add(issueId);
+        await loadWorklogsForSelectedWeek();
       };
       logsTbody.appendChild(tr);
     }
@@ -392,8 +422,8 @@
         </td>`;
 
       tr.querySelector('[data-act="cancel"]').onclick = () => {
-        // Reload list to restore original row
-        loadWorklogsForSelectedDay();
+        // Reload list to restore original row (use cache; no invalidation needed)
+        loadWorklogsForSelectedWeek();
       };
       tr.querySelector('[data-act="save"]').onclick = async () => {
         const date = tr.querySelector('[data-edit="date"]').value;
@@ -416,7 +446,9 @@
           alert('Failed to update worklog: ' + (err.errorMessages || err.message || resp.status));
           return;
         }
-        await loadWorklogsForSelectedDay();
+        // Invalidate only this issue and refresh week using cache for others
+        invalidatedIssueIds.add(issueId);
+        await loadWorklogsForSelectedWeek();
       };
     }
 
@@ -468,7 +500,9 @@
         alert('Failed to log time: ' + (err.errorMessages || err.message || res.status));
         return;
       }
-      await loadTodayWorklogs();
+      // Invalidate only the selected issue and refresh week using cache for others
+      invalidatedIssueIds.add(issueId);
+      await loadWorklogsForSelectedWeek();
     };
 
     function shiftViewWeeks(weeks) {
