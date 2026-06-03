@@ -3,537 +3,1506 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jira Timesheet</title>
+  <title>Team Member Planning</title>
   <style>
     body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 0; background: #f6f7f9; }
     header { background: #0747a6; color: white; padding: 1px 16px; display: flex; align-items: center; justify-content: space-between; }
-    header a { color: white; text-decoration: none; font-weight: bold; }
-    main { padding: 16px; max-width: 1000px; margin: 0 auto; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    select, input, button, textarea { padding: 8px; font-size: 14px; }
+    header a { color: white; text-decoration: none; font-weight: bold; margin-left: 15px; }
+    main { padding: 16px; margin: 0 auto; width: 100%; box-sizing: border-box; }
     .card { background: white; border-radius: 8px; padding: 12px; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
-    .muted { color: #666; }
-    .right { text-align: right; }
-    .danger { color: #b71c1c; }
-    .day-header { background: #f0f4ff; font-weight: 600; }
-    .day-header .right { font-weight: 700; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: bold; font-size: 14px; user-select: none; }
+    .card-header h3 { margin: 0; font-size: 14px; }
+    .card-content { margin-top: 10px; }
+    .card-content.collapsed { display: none; }
+    .toggle-icon { transition: transform 0.2s; }
+    .toggle-icon.collapsed { transform: rotate(-90deg); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, button, select { padding: 8px; font-size: 14px; }
+    #planningTableContainer { width: 100%; overflow-x: auto; }
+    table { border-collapse: collapse; margin-top: 16px; width: 100%; table-layout: auto; }
+    th, td { border: 1px solid #ddd; padding: 4px; text-align: center; font-size: 12px; white-space: nowrap; }
+
+    /* Sticky Table Header */
+    thead {
+      top: 0;
+      background-color: #f0f4ff;
+      z-index: 15;
+      position: sticky;
+    }
+
+    td { overflow: visible; }
+    td:first-child { position: sticky; left: 0; background-color: #f0f4ff; z-index: 12; width: 150px; min-width: 150px; text-align: left; }
+    .week-row td:first-child { z-index: 11; }
+    .weekend { background-color: #e8f0fe; }
+    .planning-cell { cursor: pointer; height: 45px; position: relative; padding: 0 !important; align-items: stretch; }
+    .planning-cell:hover { opacity: 0.8; }
+
+    .planning-cell-content { padding: 0 !important; display: flex; align-items: stretch; height: stretch; }
+
+    .cell-readiness-sidebar {
+      width: 20%;
+      background: #ffebee;
+      color: #d32f2f;
+      font-weight: bold;
+      font-size: 9px;
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-right: 1px solid rgba(0,0,0,0.05);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    
+    .cell-place-sidebar {
+      width: 20%;
+      background: #e3f2fd;
+      color: #1976d2;
+      font-size: 9px;
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-left: 1px solid rgba(0,0,0,0.05);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    
+    .cell-main-content {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    
+    .week-row { background-color: #f0f4ff; font-weight: bold; }
+    .week-row:hover td { background-color: #e0e8f5 !important; }
+
+
+    .delete-btn {
+      color: #cc0000;
+      cursor: pointer;
+      font-weight: bold;
+      margin-left: 4px;
+      padding: 0 4px;
+      border: none;
+      background: transparent;
+      border-radius: 4px;
+    }
+    .delete-btn:hover {
+      background-color: #ffeeee;
+    }
+    
+    .team-name-editable {
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .team-name-editable:hover {
+      background-color: rgba(0,0,0,0.05);
+    }
+    
+    /* Colors from image */
+    /* Dynamic styles are now handled via JavaScript in renderLegend() */
+    
+    .legend { display: flex; gap: 5px; flex-wrap: wrap; font-size: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border: 2px solid transparent; border-radius: 4px; cursor: pointer; }
+    .legend-item:hover { background: #eee; }
+    .legend-item.selected { border-color: #0747a6; background: #e0e8f5; font-weight: bold; }
+    .legend-color { width: 16px; height: 16px; border: 1px solid #ccc; }
+    
+    .loading { font-style: italic; color: #666; }
+    .error { color: #b71c1c; padding: 10px; border: 1px solid #b71c1c; background: #ffeeee; border-radius: 4px; margin: 10px 0; }
+    
+    .team-header { background-color: #e0e8f5; font-weight: bold; text-align: left; padding: 8px; }
+    .team-header button { float: right; }
+    .member-team-select { font-size: 10px; padding: 2px; }
+    
+    #planningTableContainer { max-height: 75vh; overflow: auto; border: 1px solid #ddd; }
+    
+    .member-pic {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      background-color: #eee;
+    }
+    .member-pic:hover {
+      opacity: 0.8;
+      border-color: #0747a6;
+    }
+    .placeholder-pic {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background-color: #ddd;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      color: #666;
+      cursor: pointer;
+      border: 1px solid #ccc;
+    }
+    .placeholder-pic:hover {
+      background-color: #ccc;
+      border-color: #0747a6;
+    }
+
+    /* Context Menu Styles */
+    #contextMenu {
+      display: none;
+      position: absolute;
+      z-index: 1000;
+      background: white;
+      border: 1px solid #ccc;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+      padding: 5px 0;
+      min-width: 150px;
+    }
+    .context-menu-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .context-menu-item:hover {
+      background-color: #f0f0f0;
+    }
+    .context-menu-header {
+      padding: 5px 12px;
+      font-weight: bold;
+      font-size: 12px;
+      color: #666;
+      border-bottom: 1px solid #eee;
+    }
+
+    /* Modal Styles */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border: 1px solid #ccc;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 24px;
+      z-index: 1001;
+      width: 320px;
+      border-radius: 8px;
+    }
+    .modal h3 {
+      margin-top: 0;
+      margin-bottom: 16px;
+      font-size: 18px;
+    }
+    .modal-field {
+      margin-bottom: 12px;
+    }
+    .modal-field label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+    .modal-field input[type="text"],
+    .modal-field input[type="number"],
+    .modal-field select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .modal-actions button {
+      padding: 6px 16px;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .btn-secondary {
+      border: 1px solid #ccc;
+      background: #fff;
+    }
+    .btn-primary {
+      background: #0747a6;
+      color: white;
+      border: none;
+    }
+    .btn-danger {
+      background: #cc0000;
+      color: white;
+      border: none;
+    }
+    .color-picker-container {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    #typeColorPicker {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border: 1px solid #ccc;
+      border-radius: 2px;
+      cursor: pointer;
+      background: none;
+    }
+    #modalOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.3);
+      z-index: 1000;
+    }
   </style>
 </head>
 <body>
   <header>
-    <h2>Jira Timesheet</h2>
-    <a href="/capacity.html">Capacity Planning</a>
+    <h2>Team Member Planning</h2>
+    <div>
+      <a href="/">Planning</a>
+      <a href="/capacity.html">Capacity</a>
+    </div>
   </header>
   <main>
-    <div class="card">
-      <div class="row">
-        <label>Issue</label>
-        <select id="issue" aria-busy="false"></select>
-        <a id="issueLink" href="#" target="_blank" rel="noopener noreferrer" title="Open selected issue in Jira" aria-label="Open selected issue in Jira" style="display:none">🔗</a>
-        <span id="issueStatus" class="muted" aria-live="polite"></span>
-        <label>Date</label>
-        <input type="date" id="date">
-        <label>Start</label>
-        <input type="time" id="start" step="60" value="09:00">
-        <label>Duration</label>
-        <input type="text" id="duration" placeholder="e.g. 1h 30m or 90m or 1.5h" value="1h">
-        <button id="add">Log</button>
+    <div id="contextMenu"></div>
+    <div class="card" id="configCard">
+      <div class="card-header" onclick="toggleCard()">
+        <h3>Configuration</h3>
+        <span id="toggleIcon" class="toggle-icon collapsed">▼</span>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h3 style="margin:0">Worklogs</h3>
-        <div class="row" aria-label="Week navigation">
-          <span id="weekNumber" class="muted" title="Calendar week" aria-live="polite" style="min-width:48px;text-align:right"></span>
-          <button id="prevWeek" title="Previous week" aria-label="Previous week">◀</button>
-          <input type="date" id="viewDate" aria-label="Any date within the week">
-          <button id="nextWeek" title="Next week" aria-label="Next week">▶</button>
+      <div id="cardContent" class="card-content collapsed">
+        <div class="row">
+          <label for="piName">PI Name (e.g. 26_04):</label>
+          <input type="text" id="piName" placeholder="PI Name">
+          <button id="loadBtn">Load Planning</button>
+          <span id="statusMsg" style="margin-left: 10px;"></span>
+          <label style="margin-left: 20px;">Start Date:</label>
+          <input type="date" id="startDate">
+          <label>End Date:</label>
+          <input type="date" id="endDate">
+        </div>
+        <div class="row" style="margin-top: 10px;">
+          <div>
+            <label for="memberInput">Add Member:</label>
+            <input type="text" id="memberInput" placeholder="Name">
+            <label>to Team:</label>
+            <select id="teamSelect"></select>
+            <button id="addMemberBtn">Add</button>
+          </div>
+          <div>
+            <label for="newTeamInput">Add Team:</label>
+            <input type="text" id="newTeamInput" placeholder="New Team Name">
+            <button id="addTeamBtn">Add</button>
+          </div>
         </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Issue</th>
-            <th>When</th>
-            <th>Duration</th>
-            <th class="right">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="logs"></tbody>
-      </table>
+    </div>
+
+    <div id="statusBar" style="display: flex;">
+      <div class="legend" id="statusLegend"></div>
+      <button id="addTypeBtn" style="font-size: 11px; padding: 4px 8px;">+ Add Type</button>
+    </div>
+
+    <!-- Type Editor Modal -->
+    <div id="typeEditorModal" class="modal">
+      <h3 id="typeEditorTitle">Add New Type</h3>
+      <div class="modal-field">
+        <label>ID (unique):</label>
+        <input type="text" id="typeId">
+      </div>
+      <div class="modal-field">
+        <label>Label:</label>
+        <input type="text" id="typeLabel">
+      </div>
+      <div class="modal-field">
+        <label>Color (Hex):</label>
+        <div class="color-picker-container">
+          <input type="color" id="typeColorPicker">
+          <input type="text" id="typeColor" placeholder="#ffffff">
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Type:</label>
+        <select id="typeKind">
+          <option value="absence">Absence (Reduces Capacity)</option>
+          <option value="information">Information (Label Only)</option>
+        </select>
+      </div>
+      <div id="reductionContainer" class="modal-field">
+        <label>Capacity Reduction (%):</label>
+        <input type="number" id="typeReduction" value="100" min="0" max="100">
+      </div>
+      <div class="modal-actions">
+        <button id="deleteTypeBtn" class="btn-danger">Delete</button>
+        <div style="flex-grow: 1;"></div>
+        <button id="cancelTypeBtn" class="btn-secondary">Cancel</button>
+        <button id="saveTypeBtn" class="btn-primary">Save</button>
+      </div>
+    </div>
+    <!-- Member Settings Modal -->
+    <div id="memberSettingsModal" class="modal">
+      <h3 id="memberSettingsTitle">Member Settings</h3>
+      <div class="modal-field">
+        <label>Working Hours per Day:</label>
+        <input type="number" id="memberHoursPerDay" value="8" min="0" max="24" step="0.5">
+      </div>
+      <div class="modal-field">
+        <label>Planning Availability (%):</label>
+        <input type="number" id="memberPlanningAvailability" value="100" min="0" max="100">
+      </div>
+      <div class="modal-field">
+        <label>Working Days (Contract):</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <label style="display: flex; align-items: center; font-size: 12px; gap: 2px;">
+            <input type="checkbox" id="workDay1" checked> Mo
+          </label>
+          <label style="display: flex; align-items: center; font-size: 12px; gap: 2px;">
+            <input type="checkbox" id="workDay2" checked> Tu
+          </label>
+          <label style="display: flex; align-items: center; font-size: 12px; gap: 2px;">
+            <input type="checkbox" id="workDay3" checked> We
+          </label>
+          <label style="display: flex; align-items: center; font-size: 12px; gap: 2px;">
+            <input type="checkbox" id="workDay4" checked> Th
+          </label>
+          <label style="display: flex; align-items: center; font-size: 12px; gap: 2px;">
+            <input type="checkbox" id="workDay5" checked> Fr
+          </label>
+          <label style="display: flex; align-items: center; font-size: 12px; gap: 2px;">
+            <input type="checkbox" id="workDay6"> Sa
+          </label>
+          <label style="display: flex; align-items: center; font-size: 12px; gap: 2px;">
+            <input type="checkbox" id="workDay0"> Su
+          </label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <div style="flex-grow: 1;"></div>
+        <button id="cancelMemberSettingsBtn" class="btn-secondary">Cancel</button>
+        <button id="saveMemberSettingsBtn" class="btn-primary">Save</button>
+      </div>
+    </div>
+
+    <div id="modalOverlay"></div>
+
+    <div class="card" id="planningCard" style="display:none">
+      <div id="planningTableContainer">
+        <table id="planningTable">
+          <thead>
+            <tr id="tableHeader">
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
     </div>
   </main>
-
+  
+  <input type="file" id="memberImageInput" style="display: none;" accept="image/*">
+  
   <script>
-    const issueSelect = document.getElementById('issue');
-    const dateInput = document.getElementById('date');
-    const startInput = document.getElementById('start');
-    const durationInput = document.getElementById('duration');
-    const issueLink = document.getElementById('issueLink');
-    const addBtn = document.getElementById('add');
-    const logsTbody = document.getElementById('logs');
-    const issueStatus = document.getElementById('issueStatus');
-    const viewDateInput = document.getElementById('viewDate');
-    const weekNumberSpan = document.getElementById('weekNumber');
-    const prevWeekBtn = document.getElementById('prevWeek');
-    const nextWeekBtn = document.getElementById('nextWeek');
-    let jiraBaseUrl = '';
-
-    // Caching issues and worklogs to avoid refetching everything on every change
-    let cachedIssues = null; // array of issues
-    const worklogCache = new Map(); // issueId -> worklogs[]
-    const invalidatedIssueIds = new Set(); // issueIds whose worklogs must be refreshed
-
-    function toJiraStarted(dateStr, timeStr) {
-      // returns timezone offset, e.g., +0200
-      const [h, m] = timeStr.split(':').map(Number);
-      const d = new Date(dateStr + 'T' + timeStr + ':00');
-      const pad = n => String(n).padStart(2, '0');
-      const tz = -d.getTimezoneOffset();
-      const sign = tz >= 0 ? '+' : '-';
-      const abs = Math.abs(tz);
-      const tzStr = sign + pad(Math.floor(abs / 60)) + pad(abs % 60);
-      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(h) + ':' + pad(m) + ':00.000' + tzStr;
+    function toggleCard() {
+      const content = document.getElementById('cardContent');
+      const icon = document.getElementById('toggleIcon');
+      content.classList.toggle('collapsed');
+      icon.classList.toggle('collapsed');
     }
+    const piNameInput = document.getElementById('piName');
+    const loadBtn = document.getElementById('loadBtn');
+    const addMemberBtn = document.getElementById('addMemberBtn');
+    const memberInput = document.getElementById('memberInput');
+    const teamSelect = document.getElementById('teamSelect');
+    const addTeamBtn = document.getElementById('addTeamBtn');
+    const newTeamInput = document.getElementById('newTeamInput');
+    const startDateInput = document.getElementById('startDate');
+    const endDateInput = document.getElementById('endDate');
+    const statusMsg = document.getElementById('statusMsg');
+    const planningCard = document.getElementById('planningCard');
+    const tableHeader = document.getElementById('tableHeader');
+    const tableBody = document.getElementById('tableBody');
+    const statusLegend = document.getElementById('statusLegend');
+    const editInfoReadiness = document.getElementById('editInfoReadiness');
+    const editInfoPlace = document.getElementById('editInfoPlace');
+    const editInfoMemberSpan = document.getElementById('editInfoMember');
+    const saveEditBoxBtn = document.getElementById('saveEditBox');
+    const closeEditBoxBtn = document.getElementById('closeEditBox');
+    const contextMenu = document.getElementById('contextMenu');
 
-    async function loadConfig() {
-      try {
-        const res = await fetch('/api/config');
-        if (!res.ok) return;
-        const cfg = await res.json();
-        if (cfg && typeof cfg.jiraBaseUrl === 'string') {
-          // normalize: no trailing slash
-          jiraBaseUrl = cfg.jiraBaseUrl.replace(/\/$/, '');
-        }
-      } catch (e) {
-        console.warn('Failed to load config', e);
-      }
-    }
-
-    function updateIssueLink() {
-      try {
-        if (!issueLink) return;
-        const sel = issueSelect.options[issueSelect.selectedIndex];
-        const key = sel?.dataset?.key;
-        if (jiraBaseUrl && key) {
-          issueLink.href = `${jiraBaseUrl}/browse/${key}`;
-          issueLink.style.display = '';
-          issueLink.title = `Open ${key} in Jira`;
-          issueLink.setAttribute('aria-label', `Open ${key} in Jira`);
-        } else {
-          issueLink.style.display = 'none';
-        }
-      } catch {
-        if (issueLink) issueLink.style.display = 'none';
-      }
-    }
-
-    async function loadIssues() {
-      try {
-        issueSelect.disabled = true;
-        addBtn.disabled = true;
-        issueSelect.setAttribute('aria-busy','true');
-        if (issueStatus) issueStatus.textContent = 'Loading issues…';
-        const res = await fetch('/api/issues');
-        if (!res.ok) {
-          const err = await res.json().catch(()=>({}));
-          const msg = err.error || err.message || (err.errorMessages && err.errorMessages.join(', ')) || `HTTP ${res.status}`;
-          if (issueStatus) issueStatus.textContent = `Failed to load issues: ${msg}`;
-          throw new Error(msg);
-        }
-        const issues = await res.json();
-        cachedIssues = issues; // cache issues
-        issueSelect.innerHTML = '';
-        issues.forEach(i => {
-          const opt = document.createElement('option');
-          opt.value = i.id;
-          opt.textContent = `${i.key} — ${i.summary}`;
-          opt.dataset.key = i.key;
-          issueSelect.appendChild(opt);
-        });
-        updateIssueLink();
-        if (issues.length === 0) {
-          if (issueStatus) issueStatus.textContent = 'No issues found.';
-        } else {
-          if (issueStatus) {
-            issueStatus.textContent = `Loaded ${issues.length} issues`;
-            setTimeout(() => { if (issueStatus.textContent.startsWith('Loaded')) issueStatus.textContent = ''; }, 1200);
-          }
-        }
-      } catch (e) {
-        console.error(e);
-        // Keep existing options if any; otherwise leave empty
-      } finally {
-        issueSelect.disabled = false;
-        addBtn.disabled = false;
-        issueSelect.setAttribute('aria-busy','false');
-      }
-    }
-
-    function getTodayISODate() {
-      const d = new Date();
-      const pad = n => String(n).padStart(2, '0');
-      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
-    }
-
-    function isSameDay(a, b) {
-      return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
-    }
-
-    async function loadTodayWorklogs() {
-      // Backward compatibility wrapper to load worklogs for the selected viewDate
-      return loadWorklogsForSelectedDay();
-    }
-
-    async function loadWorklogsForSelectedDay() {
-      // Deprecated in favor of weekly view; keep as shim
-      return loadWorklogsForSelectedWeek();
-    }
-
-    function getMonday(d) {
-      const date = new Date(d);
-      const day = date.getDay(); // 0=Sun,1=Mon,...
-      const diff = (day === 0 ? -6 : 1) - day; // shift to Monday
-      date.setDate(date.getDate() + diff);
-      date.setHours(0,0,0,0);
-      return date;
-    }
-
-    function getISOWeekNumber(date) {
-      // ISO week: weeks start on Monday, week 1 is the one with Jan 4th
-      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-      // Set to nearest Thursday (current date + 4 - current day number) with Monday=1, Sunday=7
-      const dayNum = d.getUTCDay() || 7;
-      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    function getWeekNumber(d) {
+      d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
       const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-      const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      const weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
       return weekNo;
     }
 
-    function updateWeekNumberUI() {
-      try {
-        if (!weekNumberSpan) return;
-        const ref = new Date(viewDateInput.value || getTodayISODate());
-        const monday = getMonday(ref);
-        const weekNo = getISOWeekNumber(monday);
-        weekNumberSpan.textContent = `CW ${String(weekNo).padStart(2,'0')}`;
-      } catch (e) {
-        if (weekNumberSpan) weekNumberSpan.textContent = '';
-      }
-    }
+    let currentPlanning = { pi: '', members: [], teams: {}, days: {}, pictures: {}, memberSettings: {} };
+    let selectedStatus = 'none';
+    let saveTimeout;
+    let currentMemberForImage = null;
+    let currentMemberForSettings = null;
 
-    function formatISODate(d) {
-      const pad = n => String(n).padStart(2,'0');
-      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
-    }
+    const memberSettingsModal = document.getElementById('memberSettingsModal');
+    const memberHoursPerDayInput = document.getElementById('memberHoursPerDay');
+    const memberPlanningAvailabilityInput = document.getElementById('memberPlanningAvailability');
+    const saveMemberSettingsBtn = document.getElementById('saveMemberSettingsBtn');
+    const cancelMemberSettingsBtn = document.getElementById('cancelMemberSettingsBtn');
+    const memberSettingsTitle = document.getElementById('memberSettingsTitle');
 
-    async function loadAllIssues() {
-      if (cachedIssues && Array.isArray(cachedIssues) && cachedIssues.length) {
-        return cachedIssues;
-      }
-      if (issueStatus) issueStatus.textContent = 'Loading issues…';
-      try {
-        const res = await fetch('/api/issues');
-        if (!res.ok) {
-          const err = await res.json().catch(()=>({}));
-          const msg = err.error || err.message || (err.errorMessages && err.errorMessages.join(', ')) || `HTTP ${res.status}`;
-          if (issueStatus) issueStatus.textContent = `Failed to load issues: ${msg}`;
-          throw new Error(msg);
-        }
-        const issues = await res.json();
-        cachedIssues = issues; // cache
-        // keep the loading indicator until callers finish their flows; they can clear it explicitly
-        return issues;
-      } catch (e) {
-        console.error(e);
-        throw e;
-      }
-    }
+    let planningTypes = [];
+    const typeEditorModal = document.getElementById('typeEditorModal');
+    const modalOverlay = document.getElementById('modalOverlay');
+    const typeIdInput = document.getElementById('typeId');
+    const typeLabelInput = document.getElementById('typeLabel');
+    const typeColorInput = document.getElementById('typeColor');
+    const typeColorPicker = document.getElementById('typeColorPicker');
+    const typeKindSelect = document.getElementById('typeKind');
+    const typeReductionInput = document.getElementById('typeReduction');
+    const reductionContainer = document.getElementById('reductionContainer');
+    const saveTypeBtn = document.getElementById('saveTypeBtn');
+    const cancelTypeBtn = document.getElementById('cancelTypeBtn');
+    const addTypeBtn = document.getElementById('addTypeBtn');
+    const deleteTypeBtn = document.getElementById('deleteTypeBtn');
+    const typeEditorTitle = document.getElementById('typeEditorTitle');
 
-    async function loadWorklogsForSelectedWeek() {
-      logsTbody.innerHTML = '';
-      // show loading row while fetching issues/worklogs
-      const loadingTr = document.createElement('tr');
-      loadingTr.innerHTML = '<td colspan="4" class="muted">Loading worklogs…</td>';
-      logsTbody.appendChild(loadingTr);
-      let allIssues;
-      try {
-        allIssues = await loadAllIssues();
-      } catch (e) {
-        logsTbody.innerHTML = '<tr><td colspan="4" class="danger">Cannot load worklogs because issues failed to load. Check server configuration and network.</td></tr>';
-        // in case of error, keep the error message in issueStatus
-        return;
-      }
-      // issues successfully loaded; update status to more stable message and clear it after a short delay to avoid flicker
-      if (issueStatus) {
-        const count = Array.isArray(allIssues) ? allIssues.length : 0;
-        issueStatus.textContent = `Loaded ${count} issues`;
-        setTimeout(() => { if (issueStatus.textContent.startsWith('Loaded')) issueStatus.textContent = ''; }, 1200);
-      }
-      logsTbody.innerHTML = '';
-      const refDate = new Date(viewDateInput.value || getTodayISODate());
-      const monday = getMonday(refDate);
-      const weekDays = Array.from({length:7}, (_,i)=>{
-        const d = new Date(monday);
-        d.setDate(monday.getDate()+i);
-        return d;
+    let editingTypeId = null;
+
+    function openMemberSettings(memberName) {
+      currentMemberForSettings = memberName;
+      memberSettingsTitle.textContent = `Settings for ${memberName}`;
+      
+      const settings = (currentPlanning.memberSettings && currentPlanning.memberSettings[memberName]) || {
+        hoursPerDay: 8,
+        availability: 100,
+        workingDays: [1, 2, 3, 4, 5]
+      };
+
+      memberHoursPerDayInput.value = settings.hoursPerDay;
+      memberPlanningAvailabilityInput.value = settings.availability;
+      
+      [0,1,2,3,4,5,6].forEach(day => {
+        const cb = document.getElementById(`workDay${day}`);
+        if (cb) cb.checked = settings.workingDays.includes(day);
       });
 
-      // Fetch worklogs per issue and group by day
-      const dayGroups = weekDays.map(d => ({ date: new Date(d), logs: [] }));
-
-      for (const issue of allIssues) {
-        let list;
-        // refresh cache if this issue was invalidated or not present
-        if (invalidatedIssueIds.has(issue.id) || !worklogCache.has(issue.id)) {
-          const res = await fetch(`/api/issues/${issue.id}/worklogs`);
-          list = await res.json();
-          worklogCache.set(issue.id, list);
-        } else {
-          list = worklogCache.get(issue.id);
-        }
-        list.forEach(w => {
-          const started = new Date(w.started);
-          for (let i=0;i<7;i++) {
-            if (isSameDay(started, weekDays[i])) {
-              dayGroups[i].logs.push({ ...w, issueId: issue.id, issueKey: issue.key, issueSummary: issue.summary });
-              break;
-            }
-          }
-        });
-      }
-      // clear invalidations after refresh
-      invalidatedIssueIds.clear();
-
-      // Render rows, ensuring a full week Mon-Sun with a header per day showing totals
-      const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-      for (let i=0;i<7;i++) {
-        const group = dayGroups[i];
-        // compute total minutes for the day
-        const totalMinutes = group.logs.reduce((sum, w)=> sum + Math.round((w.timeSpentSeconds||0)/60), 0);
-        // Day header row
-        const headerTr = document.createElement('tr');
-        headerTr.className = 'day-header';
-        headerTr.innerHTML = `<td colspan="3">${dayNames[i]} ${formatISODate(group.date)}</td><td class="right">${formatMinutesAsHHMM(totalMinutes)}</td>`;
-        logsTbody.appendChild(headerTr);
-
-        if (group.logs.length === 0) {
-          const emptyTr = document.createElement('tr');
-          emptyTr.innerHTML = `<td colspan="4" class="muted">No worklogs</td>`;
-          logsTbody.appendChild(emptyTr);
-          continue;
-        }
-        // For groups with logs, render a row per log
-        group.logs.sort((a,b)=> new Date(a.started)-new Date(b.started));
-        group.logs.forEach((w) => {
-          const tr = document.createElement('tr');
-          const sum = (w.issueSummary || '').slice(0,25);
-          const sumSuffix = (w.issueSummary || '').length > 25 ? '…' : '';
-          const issueText = `${w.issueKey}${sum ? ' — ' + sum + sumSuffix : ''}`;
-          const linkHtml = (jiraBaseUrl && w.issueKey) ? ` <a href="${jiraBaseUrl}/browse/${w.issueKey}" target="_blank" rel="noopener noreferrer" aria-label="Open ${w.issueKey} in Jira" title="Open ${w.issueKey} in Jira">🔗</a>` : '';
-          tr.innerHTML = `
-            <td>${issueText}${linkHtml}</td>
-            <td>${new Date(w.started).toLocaleString()}</td>
-            <td>${formatMinutesAsHHMM(Math.round((w.timeSpentSeconds||0)/60))}</td>
-            <td class="right">
-              <button data-act="edit">Edit</button>
-              <button data-act="delete" class="danger">Delete</button>
-            </td>`;
-          const issueId = w.issueId;
-          tr.querySelector('[data-act="edit"]').onclick = () => startEdit(issueId, w, tr);
-          tr.querySelector('[data-act="delete"]').onclick = async () => {
-            if (!confirm('Delete this worklog?')) return;
-            const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, { method: 'DELETE' });
-            if (!resp.ok && resp.status!==204) {
-              alert('Failed to delete');
-              return;
-            }
-            // mark this issue as invalidated and refresh week using cache for others
-            invalidatedIssueIds.add(issueId);
-            await loadWorklogsForSelectedWeek();
-          };
-          logsTbody.appendChild(tr);
-        });
-      }
+      memberSettingsModal.style.display = 'block';
+      modalOverlay.style.display = 'block';
     }
 
-    // Legacy single-row renderer (unused in weekly view)
-    function addRow(issueId, w) {
-      const tr = document.createElement('tr');
-      const summary = (w.issueSummary || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[1] || '').slice(0,25);
-      const sumSuffix = (w.issueSummary || '').length > 25 ? '…' : '';
-      const baseKey = (w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]);
-      const issueText = `${baseKey}${summary ? ' — ' + summary + sumSuffix : ''}`;
-      const linkHtml = (jiraBaseUrl && baseKey) ? ` <a href="${jiraBaseUrl}/browse/${baseKey}" target="_blank" rel="noopener noreferrer" aria-label="Open ${baseKey} in Jira" title="Open ${baseKey} in Jira">🔗</a>` : '';
-      tr.innerHTML = `
-        <td>${issueText}${linkHtml}</td>
-        <td>${new Date(w.started).toLocaleString()}</td>
-        <td>${formatMinutesAsHHMM(Math.round((w.timeSpentSeconds||0)/60))}</td>
-        <td class="right">
-          <button data-act="edit">Edit</button>
-          <button data-act="delete" class="danger">Delete</button>
-        </td>`;
-      tr.querySelector('[data-act="edit"]').onclick = () => startEdit(issueId, w, tr);
-      tr.querySelector('[data-act="delete"]').onclick = async () => {
-        if (!confirm('Delete this worklog?')) return;
-        const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, { method: 'DELETE' });
-        if (!resp.ok && resp.status!==204) {
-          alert('Failed to delete');
-          return;
-        }
-        invalidatedIssueIds.add(issueId);
-        await loadWorklogsForSelectedWeek();
+    saveMemberSettingsBtn.onclick = () => {
+      if (!currentMemberForSettings) return;
+      
+      if (!currentPlanning.memberSettings) currentPlanning.memberSettings = {};
+      
+      const workingDays = [];
+      [0,1,2,3,4,5,6].forEach(day => {
+        const cb = document.getElementById(`workDay${day}`);
+        if (cb && cb.checked) workingDays.push(day);
+      });
+
+      currentPlanning.memberSettings[currentMemberForSettings] = {
+        hoursPerDay: parseFloat(memberHoursPerDayInput.value) || 0,
+        availability: parseFloat(memberPlanningAvailabilityInput.value) || 0,
+        workingDays: workingDays
       };
-      logsTbody.appendChild(tr);
-    }
 
-    function getLocalDateTimeParts(iso) {
-      const d = new Date(iso);
-      const pad = n => String(n).padStart(2,'0');
-      return {
-        date: d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()),
-        time: pad(d.getHours()) + ':' + pad(d.getMinutes())
-      };
-    }
-
-    function startEdit(issueId, w, tr) {
-      const parts = getLocalDateTimeParts(w.started);
-      const mins = Math.round((w.timeSpentSeconds||0)/60);
-      const summary = (w.issueSummary || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[1] || '').slice(0,25);
-      const sumSuffix = (w.issueSummary || '').length > 25 ? '…' : '';
-      const baseKey = (w.issueKey || issueSelect.options[issueSelect.selectedIndex]?.textContent?.split(' — ')[0]);
-      const issueText = `${baseKey}${summary ? ' — ' + summary + sumSuffix : ''}`;
-      const linkHtml = (jiraBaseUrl && baseKey) ? ` <a href="${jiraBaseUrl}/browse/${baseKey}" target="_blank" rel="noopener noreferrer" aria-label="Open ${baseKey} in Jira" title="Open ${baseKey} in Jira">🔗</a>` : '';
-      tr.innerHTML = `
-        <td>${issueText}${linkHtml}</td>
-        <td>
-          <input type="date" data-edit="date" value="${parts.date}">
-          <input type="time" data-edit="time" step="60" value="${parts.time}">
-        </td>
-        <td>
-          <input type="text" data-edit="duration" value="${mins}">
-        </td>
-        <td class="right">
-          <button data-act="save">Save</button>
-          <button data-act="cancel" class="danger">Cancel</button>
-        </td>`;
-
-      tr.querySelector('[data-act="cancel"]').onclick = () => {
-        // Reload list to restore original row (use cache; no invalidation needed)
-        loadWorklogsForSelectedWeek();
-      };
-      tr.querySelector('[data-act="save"]').onclick = async () => {
-        const date = tr.querySelector('[data-edit="date"]').value;
-        const time = tr.querySelector('[data-edit="time"]').value || '00:00';
-        const durationStr = tr.querySelector('[data-edit="duration"]').value;
-        const started = toJiraStarted(date, time);
-        const minutes = parseJiraDurationToMinutes(durationStr);
-        if (!date || !Number.isFinite(minutes) || minutes <= 0) {
-          alert('Enter a valid date and duration (e.g., 1h 30m, 90m, 1.5h, 01:30).');
-          return;
-        }
-        const body = { started, timeSpentSeconds: Math.round(minutes)*60 };
-        const resp = await fetch(`/api/issues/${issueId}/worklogs/${w.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(()=>({}));
-          alert('Failed to update worklog: ' + (err.errorMessages || err.message || resp.status));
-          return;
-        }
-        // Invalidate only this issue and refresh week using cache for others
-        invalidatedIssueIds.add(issueId);
-        await loadWorklogsForSelectedWeek();
-      };
-    }
-
-    function formatMinutesAsHHMM(mins) {
-      if (!Number.isFinite(mins)) return '';
-      const h = Math.floor(mins/60);
-      const m = mins % 60;
-      return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
-    }
-
-    function parseJiraDurationToMinutes(input) {
-      if (!input) return NaN;
-      const s = String(input).trim().toLowerCase();
-      const hm = s.match(/^([0-9]{1,3}):(\d{2})$/);
-      if (hm) {
-        const h = parseInt(hm[1],10);
-        const m = parseInt(hm[2],10);
-        if (m>=60) return NaN;
-        return h*60 + m;
-      }
-      const re = /([0-9]*\.?[0-9]+)\s*([wdhm])/g;
-      let match; let totalMinutes = 0; let any=false;
-      while ((match = re.exec(s))){
-        any = true;
-        const val = parseFloat(match[1]);
-        const unit = match[2];
-        if (unit==='w') totalMinutes += val*5*8*60;
-        else if (unit==='d') totalMinutes += val*8*60;
-        else if (unit==='h') totalMinutes += val*60;
-        else if (unit==='m') totalMinutes += val;
-      }
-      if (any) return Math.round(totalMinutes);
-      const num = parseFloat(s.replace(',','.'));
-      if (Number.isFinite(num)) return Math.round(num);
-      return NaN;
-    }
-
-
-    addBtn.onclick = async () => {
-      const issueId = issueSelect.value;
-      if (!issueId) return alert('Select an issue');
-      const started = toJiraStarted(dateInput.value, startInput.value);
-      const minutes = parseJiraDurationToMinutes(durationInput.value);
-      if (!Number.isFinite(minutes) || minutes <= 0) return alert('Enter a valid duration (e.g., 1h 30m, 90m, 1.5h, 01:30)');
-      const body = { started, timeSpentSeconds: Math.round(minutes) * 60 };
-      const res = await fetch(`/api/issues/${issueId}/worklogs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) {
-        const err = await res.json().catch(()=>({}));
-        alert('Failed to log time: ' + (err.errorMessages || err.message || res.status));
-        return;
-      }
-      // Invalidate only the selected issue and refresh week using cache for others
-      invalidatedIssueIds.add(issueId);
-      await loadWorklogsForSelectedWeek();
+      memberSettingsModal.style.display = 'none';
+      modalOverlay.style.display = 'none';
+      currentMemberForSettings = null;
+      renderPlanning();
+      triggerAutosave();
     };
 
-    function shiftViewWeeks(weeks) {
-      const d = new Date(viewDateInput.value || getTodayISODate());
-      d.setDate(d.getDate() + weeks*7);
-      const pad = n => String(n).padStart(2, '0');
-      viewDateInput.value = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
-      loadWorklogsForSelectedWeek();
-      updateWeekNumberUI();
+    cancelMemberSettingsBtn.onclick = () => {
+      memberSettingsModal.style.display = 'none';
+      modalOverlay.style.display = 'none';
+      currentMemberForSettings = null;
+    };
+
+    async function fetchPlanningTypes() {
+      const res = await fetch('/api/planning/types');
+      planningTypes = await res.json();
+      
+      // Update legacy constants
+      STATUS_TYPES.length = 0;
+      Object.keys(STATUS_LABELS).forEach(key => delete STATUS_LABELS[key]);
+      
+      planningTypes.forEach(t => {
+        STATUS_TYPES.push(t.id);
+        STATUS_LABELS[t.id] = t.label;
+      });
+      STATUS_LABELS['readiness'] = 'Readiness';
+      STATUS_LABELS['place'] = 'Place';
+
+      renderLegend();
+      if (currentPlanning && currentPlanning.pi) {
+        renderPlanning();
+      }
     }
 
-    (function init() {
-      const today = getTodayISODate();
-      dateInput.value = today; // default for new worklogs
-      viewDateInput.value = today; // default for viewing
-      loadConfig().then(loadIssues).then(() => { loadWorklogsForSelectedWeek(); updateWeekNumberUI(); updateIssueLink(); });
-      issueSelect.onchange = () => { updateIssueLink(); }; // do not reload when switching issue
-      viewDateInput.onchange = () => { loadWorklogsForSelectedWeek(); updateWeekNumberUI(); };
-      prevWeekBtn.onclick = () => shiftViewWeeks(-1);
-      nextWeekBtn.onclick = () => shiftViewWeeks(1);
-      // keyboard accessibility for arrows
-      prevWeekBtn.onkeyup = (e) => { if (e.key === 'Enter' || e.key === ' ') shiftViewWeeks(-1); };
-      nextWeekBtn.onkeyup = (e) => { if (e.key === 'Enter' || e.key === ' ') shiftViewWeeks(1); };
-
-      // If issues failed to load, allow retry by clicking the status text
-      if (issueStatus) {
-        issueStatus.style.cursor = 'pointer';
-        issueStatus.title = 'Click to retry loading issues';
-        issueStatus.onclick = () => loadConfig().then(loadIssues).then(() => { loadWorklogsForSelectedWeek(); updateIssueLink(); });
+    function renderLegend() {
+      statusLegend.innerHTML = '';
+      
+      // Update dynamic styles for status colors
+      let styleTag = document.getElementById('dynamic-status-styles');
+      if (!styleTag) {
+        styleTag = document.createElement('style');
+        styleTag.id = 'dynamic-status-styles';
+        document.head.appendChild(styleTag);
       }
-    })();
+      
+      let css = '';
+      planningTypes.forEach(type => {
+        css += `.status-${type.id} { background-color: ${type.color}; }\n`;
+        // For dark colors, make text white
+        const isDark = isColorDark(type.color);
+        if (isDark) {
+          css += `.status-${type.id} { color: white; }\n`;
+        } else {
+          css += `.status-${type.id} { color: black; }\n`;
+        }
+
+        const item = document.createElement('div');
+        item.className = 'legend-item' + (selectedStatus === type.id ? ' selected' : '');
+        item.setAttribute('data-status', type.id);
+        
+        const colorBox = document.createElement('div');
+        colorBox.className = 'legend-color';
+        colorBox.style.backgroundColor = type.color;
+        item.appendChild(colorBox);
+        
+        const label = document.createElement('span');
+        label.textContent = type.label || (type.id === 'none' ? 'Available' : type.id);
+        item.appendChild(label);
+        
+        item.onclick = () => {
+          selectedStatus = type.id;
+          document.querySelectorAll('.legend-item').forEach(li => li.classList.remove('selected'));
+          item.classList.add('selected');
+        };
+
+        item.oncontextmenu = (e) => {
+          e.preventDefault();
+          if (type.id === 'none') return;
+          openTypeEditor(type);
+        };
+        
+        statusLegend.appendChild(item);
+      });
+      styleTag.textContent = css;
+
+      // Fixed items
+      const divider = document.createElement('div');
+      divider.style.borderLeft = '1px solid #ccc';
+      divider.style.margin = '0 10px';
+      statusLegend.appendChild(divider);
+
+      const readinessItem = createFixedLegendItem('readiness', 'Readiness', '#d32f2f');
+      statusLegend.appendChild(readinessItem);
+
+      const placeItem = createFixedLegendItem('place', 'Place', '#1976d2');
+      statusLegend.appendChild(placeItem);
+    }
+
+    function isColorDark(color) {
+      if (!color || !color.startsWith('#')) return false;
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      // HSP color model http://alienryderflex.com/hsp.html
+      const hsp = Math.sqrt(0.299 * (r * r) + 0.587 * (g * g) + 0.114 * (b * b));
+      return hsp < 150;
+    }
+
+    function createFixedLegendItem(id, labelText, color) {
+      const item = document.createElement('div');
+      item.className = 'legend-item' + (selectedStatus === id ? ' selected' : '');
+      item.setAttribute('data-status', id);
+      
+      const colorBox = document.createElement('div');
+      colorBox.className = 'legend-color';
+      colorBox.style.border = `2px solid ${color}`;
+      colorBox.style.background = '#fff';
+      item.appendChild(colorBox);
+      
+      const label = document.createElement('span');
+      label.textContent = labelText;
+      label.style.color = color;
+      label.style.fontWeight = 'bold';
+      item.appendChild(label);
+      
+      item.onclick = () => {
+        selectedStatus = id;
+        document.querySelectorAll('.legend-item').forEach(li => li.classList.remove('selected'));
+        item.classList.add('selected');
+      };
+      return item;
+    }
+
+    function openTypeEditor(type = null) {
+      editingTypeId = type ? type.id : null;
+      typeEditorTitle.textContent = type ? 'Edit Type' : 'Add New Type';
+      typeIdInput.value = type ? type.id : '';
+      typeIdInput.disabled = !!type;
+      typeLabelInput.value = type ? type.label : '';
+      typeColorInput.value = type ? type.color : '#ffffff';
+      typeColorPicker.value = type ? (type.color.startsWith('#') ? type.color : '#ffffff') : '#ffffff';
+      typeKindSelect.value = type ? type.type : 'absence';
+      typeReductionInput.value = type ? (type.reduction !== undefined ? type.reduction : 100) : 100;
+      
+      reductionContainer.style.display = typeKindSelect.value === 'absence' ? 'block' : 'none';
+      deleteTypeBtn.style.display = type ? 'inline-block' : 'none';
+      
+      typeEditorModal.style.display = 'block';
+      modalOverlay.style.display = 'block';
+    }
+
+    typeKindSelect.onchange = () => {
+      reductionContainer.style.display = typeKindSelect.value === 'absence' ? 'block' : 'none';
+    };
+
+    typeColorPicker.oninput = () => {
+      typeColorInput.value = typeColorPicker.value;
+    };
+
+    typeColorInput.oninput = () => {
+      if (/^#[0-9A-F]{6}$/i.test(typeColorInput.value)) {
+        typeColorPicker.value = typeColorInput.value;
+      }
+    };
+
+    addTypeBtn.onclick = () => openTypeEditor();
+    cancelTypeBtn.onclick = () => {
+      typeEditorModal.style.display = 'none';
+      modalOverlay.style.display = 'none';
+    };
+
+    deleteTypeBtn.onclick = async () => {
+      if (confirm('Delete this type? This will not remove it from existing planning data but it will no longer be available in the legend.')) {
+        planningTypes = planningTypes.filter(t => t.id !== editingTypeId);
+        await saveTypes();
+        typeEditorModal.style.display = 'none';
+        modalOverlay.style.display = 'none';
+      }
+    };
+
+    saveTypeBtn.onclick = async () => {
+      const id = typeIdInput.value.trim().toLowerCase().replace(/\s+/g, '-');
+      if (!id) return alert('ID is required');
+      
+      const newType = {
+        id,
+        label: typeLabelInput.value.trim(),
+        color: typeColorInput.value.trim() || '#ffffff',
+        type: typeKindSelect.value,
+        reduction: typeKindSelect.value === 'absence' ? parseInt(typeReductionInput.value) || 0 : 0
+      };
+
+      if (editingTypeId) {
+        const index = planningTypes.findIndex(t => t.id === editingTypeId);
+        planningTypes[index] = newType;
+      } else {
+        if (planningTypes.some(t => t.id === id)) return alert('ID already exists');
+        planningTypes.push(newType);
+      }
+
+      await saveTypes();
+      typeEditorModal.style.display = 'none';
+      modalOverlay.style.display = 'none';
+    };
+
+    async function saveTypes() {
+      await fetch('/api/planning/types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(planningTypes)
+      });
+      renderLegend();
+      renderPlanning(); // Refresh colors in table
+    }
+
+    fetchPlanningTypes();
+
+
+
+    function triggerAutosave() {
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(savePlanning, 1000);
+    }
+
+    // Handle legend selection
+    // (removed original hardcoded listener)
+
+    const STATUS_TYPES = []; // Will be populated from planningTypes
+    const STATUS_LABELS = {}; // Will be populated from planningTypes
+
+    async function loadPlanning() {
+      const pi = piNameInput.value.trim();
+      if (!pi) return alert('Enter PI Name');
+      
+      statusMsg.innerHTML = '<span class="loading">Loading...</span>';
+      try {
+        const res = await fetch(`/api/planning?pi=${encodeURIComponent(pi)}`);
+        const data = await res.json();
+        
+        currentPlanning = data;
+        
+        // Migrate old data structure
+        if (!currentPlanning.teams) currentPlanning.teams = {};
+        if (!currentPlanning.memberSettings) currentPlanning.memberSettings = {};
+        if (currentPlanning.startDate) startDateInput.value = currentPlanning.startDate;
+        if (currentPlanning.endDate) endDateInput.value = currentPlanning.endDate;
+
+        if (currentPlanning.members && currentPlanning.members.length > 0) {
+          // If some members aren't in any team, put them in 'Unassigned'
+          const assignedMembers = new Set();
+          Object.values(currentPlanning.teams).forEach(teamMembers => {
+            teamMembers.forEach(m => assignedMembers.add(m));
+          });
+          
+          const unassigned = currentPlanning.members.filter(m => !assignedMembers.has(m));
+          if (unassigned.length > 0) {
+            if (!currentPlanning.teams['Unassigned']) currentPlanning.teams['Unassigned'] = [];
+            currentPlanning.teams['Unassigned'] = [...new Set([...currentPlanning.teams['Unassigned'], ...unassigned])];
+          }
+        }
+
+        // Reset inputs if loading new PI without stored dates
+        if (!currentPlanning.days || Object.keys(currentPlanning.days).length === 0) {
+          startDateInput.value = '';
+          endDateInput.value = '';
+        }
+
+        // Sync members from Jira
+        statusMsg.innerHTML = '<span class="loading">Syncing members from Jira...</span>';
+        try {
+          const jiraRes = await fetch(`/api/planning/members?pi=${encodeURIComponent(pi)}`);
+          const jiraData = await jiraRes.json();
+          if (jiraData.members) {
+            jiraData.members.forEach(m => {
+              if (!currentPlanning.members.includes(m)) {
+                currentPlanning.members.push(m);
+                // Put new Jira members in Unassigned
+                if (!currentPlanning.teams['Unassigned']) currentPlanning.teams['Unassigned'] = [];
+                if (!currentPlanning.teams['Unassigned'].includes(m)) {
+                  currentPlanning.teams['Unassigned'].push(m);
+                }
+              }
+            });
+            currentPlanning.members.sort();
+          }
+        } catch (je) {
+          console.error('Failed to sync members from Jira', je);
+        }
+
+        renderPlanning();
+        statusMsg.innerHTML = 'Loaded and synced with Jira.';
+      } catch (e) {
+        statusMsg.innerHTML = '<span class="error">Failed to load</span>';
+      }
+    }
+
+    function updateTeamSelect() {
+      const teams = Object.keys(currentPlanning.teams).sort();
+      teamSelect.innerHTML = '';
+      teams.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        teamSelect.appendChild(opt);
+      });
+      // Add 'Unassigned' if not present
+      if (!currentPlanning.teams['Unassigned']) {
+        const opt = document.createElement('option');
+        opt.value = 'Unassigned';
+        opt.textContent = 'Unassigned';
+        teamSelect.appendChild(opt);
+      }
+    }
+
+    function renderPlanning() {
+      const sortedTeams = Object.keys(currentPlanning.teams).sort((a, b) => {
+        if (a === 'Unassigned') return 1;
+        if (b === 'Unassigned') return -1;
+        return a.localeCompare(b);
+      });
+
+      const teamSelectValue = teamSelect.value;
+      updateTeamSelect();
+      if (Array.from(teamSelect.options).some(opt => opt.value === teamSelectValue)) {
+        teamSelect.value = teamSelectValue;
+      }
+
+      if (!startDateInput.value || !endDateInput.value) {
+        // Try to guess dates from existing data if possible, else default to some range
+        if (Object.keys(currentPlanning.days).length > 0) {
+          const dates = Object.keys(currentPlanning.days).sort();
+          startDateInput.value = dates[0];
+          endDateInput.value = dates[dates.length - 1];
+        } else {
+          // Default range: 3 months from today
+          const start = new Date();
+          const end = new Date();
+          end.setMonth(start.getMonth() + 3);
+          startDateInput.value = start.toISOString().split('T')[0];
+          endDateInput.value = end.toISOString().split('T')[0];
+        }
+      }
+
+      planningCard.style.display = 'block';
+
+      // Render Header
+      while (tableHeader.cells.length > 1) tableHeader.deleteCell(1);
+
+      const memberListOrdered = [];
+
+      sortedTeams.forEach(teamName => {
+        const teamMembers = currentPlanning.teams[teamName] || [];
+        if (teamMembers.length === 0 && teamName !== 'Unassigned') return;
+
+        teamMembers.sort().forEach(m => {
+          memberListOrdered.push({ name: m, team: teamName });
+          const th = document.createElement('th');
+          th.style.minWidth = '100px';
+
+          const wrapper = document.createElement('div');
+          wrapper.style.display = 'flex';
+          wrapper.style.flexDirection = 'column';
+          wrapper.style.alignItems = 'center';
+          wrapper.style.justifyContent = 'center';
+          wrapper.style.gap = '4px';
+          
+          // Profile Picture
+          const picUrl = currentPlanning.pictures && currentPlanning.pictures[m];
+          if (picUrl) {
+            const img = document.createElement('img');
+            img.src = picUrl;
+            img.className = 'member-pic';
+            img.title = `Click to change picture for ${m}`;
+            img.onclick = () => {
+              currentMemberForImage = m;
+              document.getElementById('memberImageInput').click();
+            };
+            wrapper.appendChild(img);
+          } else {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'placeholder-pic';
+            placeholder.textContent = m.charAt(0).toUpperCase();
+            placeholder.title = `Click to add picture for ${m}`;
+            placeholder.onclick = () => {
+              currentMemberForImage = m;
+              document.getElementById('memberImageInput').click();
+            };
+            wrapper.appendChild(placeholder);
+          }
+          
+          const nameDiv = document.createElement('div');
+          nameDiv.style.overflow = 'hidden';
+          nameDiv.style.textOverflow = 'ellipsis';
+          nameDiv.style.maxWidth = '150px';
+          nameDiv.style.whiteSpace = 'wrap';
+          nameDiv.style.fontWeight = 'bold';
+          nameDiv.textContent = m;
+          nameDiv.title = 'Click for settings, right-click to change team';
+          nameDiv.className = 'team-name-editable';
+          nameDiv.onclick = () => openMemberSettings(m);
+          wrapper.appendChild(nameDiv);
+
+          const settingsInfo = document.createElement('div');
+          settingsInfo.style.fontSize = '9px';
+          settingsInfo.style.color = '#666';
+          const settings = (currentPlanning.memberSettings && currentPlanning.memberSettings[m]) || { hoursPerDay: 8, availability: 100 };
+          settingsInfo.textContent = `${settings.hoursPerDay}h/d, ${settings.availability}%`;
+          wrapper.appendChild(settingsInfo);
+
+          // Context Menu for team assignment
+          wrapper.oncontextmenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            contextMenu.innerHTML = '';
+            
+            const header = document.createElement('div');
+            header.className = 'context-menu-header';
+            header.textContent = `Move ${m} to Team:`;
+            contextMenu.appendChild(header);
+
+            sortedTeams.forEach(t => {
+              const item = document.createElement('div');
+              item.className = 'context-menu-item';
+              item.textContent = t + (t === teamName ? ' (current)' : '');
+              item.onclick = () => {
+                if (t !== teamName) {
+                  // Remove from old team
+                  currentPlanning.teams[teamName] = currentPlanning.teams[teamName].filter(tm => tm !== m);
+                  // Add to new team
+                  if (!currentPlanning.teams[t]) currentPlanning.teams[t] = [];
+                  currentPlanning.teams[t].push(m);
+                  renderPlanning();
+                  triggerAutosave();
+                }
+                contextMenu.style.display = 'none';
+              };
+              contextMenu.appendChild(item);
+            });
+
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.pageX + 'px';
+            contextMenu.style.top = e.pageY + 'px';
+          };
+
+          th.appendChild(wrapper);
+
+          // Add delete button for member
+          const delBtn = document.createElement('button');
+          delBtn.textContent = '×';
+          delBtn.className = 'delete-btn';
+          delBtn.title = `Remove ${m}`;
+          delBtn.style.position = 'absolute';
+          delBtn.style.top = '2px';
+          delBtn.style.right = '2px';
+          delBtn.onclick = () => {
+            if (confirm(`Remove ${m}?`)) {
+              currentPlanning.members = currentPlanning.members.filter(mem => mem !== m);
+              currentPlanning.teams[teamName] = currentPlanning.teams[teamName].filter(tm => tm !== m);
+              renderPlanning();
+              triggerAutosave();
+            }
+          };
+          th.appendChild(delBtn);
+          tableHeader.appendChild(th);
+        });
+      });
+
+      // Insert Team grouping row if it doesn't exist
+      let teamRow = document.getElementById('teamRow');
+      if (!teamRow) {
+        teamRow = document.createElement('tr');
+        teamRow.id = 'teamRow';
+        tableHeader.parentNode.insertBefore(teamRow, tableHeader.nextSibling);
+      } else {
+        teamRow.innerHTML = '';
+      }
+      let teamHeader = document.createElement('th');
+      teamHeader.textContent = 'Team';
+      teamRow.appendChild(teamHeader);
+      
+      sortedTeams.forEach(teamName => {
+        const teamMembers = currentPlanning.teams[teamName] || [];
+        if (teamMembers.length === 0 && teamName !== 'Unassigned') return;
+        
+        const th = document.createElement('th');
+        th.className = 'team-header';
+        th.colSpan = teamMembers.length;
+        
+        const teamSpan = document.createElement('span');
+        teamSpan.textContent = teamName;
+        teamSpan.className = 'team-name-editable';
+        
+        if (teamName !== 'Unassigned') {
+          teamSpan.title = 'Click to rename';
+          teamSpan.onclick = () => {
+            const newName = prompt(`Rename team "${teamName}" to:`, teamName);
+            if (newName && newName !== teamName) {
+              if (currentPlanning.teams[newName]) {
+                alert('Team with this name already exists.');
+                return;
+              }
+              currentPlanning.teams[newName] = currentPlanning.teams[teamName];
+              delete currentPlanning.teams[teamName];
+              renderPlanning();
+              triggerAutosave();
+            }
+          };
+        }
+        th.appendChild(teamSpan);
+        
+        if (teamName !== 'Unassigned') {
+          const delTeamBtn = document.createElement('button');
+          delTeamBtn.textContent = '×';
+          delTeamBtn.className = 'delete-btn';
+          delTeamBtn.title = `Delete team "${teamName}"`;
+          delTeamBtn.onclick = () => {
+            if (confirm(`Delete team "${teamName}"? Members will be moved to Unassigned.`)) {
+              if (!currentPlanning.teams['Unassigned']) currentPlanning.teams['Unassigned'] = [];
+              currentPlanning.teams['Unassigned'].push(...currentPlanning.teams[teamName]);
+              delete currentPlanning.teams[teamName];
+              renderPlanning();
+              triggerAutosave();
+            }
+          };
+          th.appendChild(delTeamBtn);
+        }
+        
+        if (teamMembers.length > 0) {
+           teamRow.appendChild(th);
+        }
+      });
+
+      // Render Body (Rows for dates)
+      tableBody.innerHTML = '';
+      const start = new Date(startDateInput.value);
+      const end = new Date(endDateInput.value);
+      
+      let currentWeek = -1;
+      
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        
+        const weekNum = getWeekNumber(d);
+        if (weekNum !== currentWeek) {
+          currentWeek = weekNum;
+          const weekTr = document.createElement('tr');
+          weekTr.className = 'week-row';
+          
+          const weekLabelTd = document.createElement('td');
+          weekLabelTd.textContent = `CW ${weekNum}`;
+          weekLabelTd.title = 'Click to apply selected status/info to ALL members for this whole week';
+          weekLabelTd.style.cursor = 'pointer';
+          weekLabelTd.style.fontWeight = 'bold';
+          weekLabelTd.style.backgroundColor = '#dbeafe';
+          
+          const weekStartDate = new Date(d);
+          const getDaysInWeek = () => {
+            const daysInWeek = [];
+            const tempDate = new Date(weekStartDate);
+            // Go to Monday of this week (or start if after Monday)
+            while(tempDate.getDay() !== 1 && tempDate > start) {
+              tempDate.setDate(tempDate.getDate() - 1);
+            }
+            // Add all days of this week within range
+            for(let i=0; i<7; i++) {
+              if (tempDate >= start && tempDate <= end && getWeekNumber(tempDate) === weekNum) {
+                daysInWeek.push(tempDate.toISOString().split('T')[0]);
+              }
+              tempDate.setDate(tempDate.getDate() + 1);
+            }
+            return daysInWeek;
+          };
+
+          const applyToMemberInWeek = (member, days, initialValue = null) => {
+            let val = initialValue;
+            if (selectedStatus === 'readiness') {
+              // Check if all members for all these days already have 'Readiness'
+              let allHaveReadiness = true;
+              days.forEach(ds => {
+                if (!currentPlanning.days[ds]) {
+                  allHaveReadiness = false;
+                  return;
+                }
+                const dD = currentPlanning.days[ds][member];
+                if (!(dD && (typeof dD === 'object') && dD.readiness === 'Readiness')) {
+                  allHaveReadiness = false;
+                }
+              });
+              val = allHaveReadiness ? null : 'Readiness';
+            } else if (selectedStatus === 'place' && val === null) {
+              val = prompt(`Set Place for ${member} for this week:`, '');
+              if (val === null) return; // Cancel
+            } else if (selectedStatus === 'freetext' && val === null) {
+              val = prompt(`Enter Free Text for ${member} for this week:`, '');
+              if (val === null) return; // Cancel
+            }
+
+            days.forEach(ds => {
+              if (!currentPlanning.days[ds]) currentPlanning.days[ds] = {};
+              let dayData = currentPlanning.days[ds][member];
+              if (typeof dayData !== 'object' || dayData === null) {
+                dayData = { status: dayData || 'none' };
+              }
+              
+              if (selectedStatus === 'readiness') {
+                if (val === 'Readiness') {
+                  dayData.readiness = val;
+                } else {
+                  delete dayData.readiness;
+                }
+              } else if (selectedStatus === 'place') {
+                dayData.place = val;
+              } else if (selectedStatus === 'freetext') {
+                dayData.status = 'freetext';
+                dayData.freetext = val;
+              } else {
+                dayData.status = selectedStatus;
+              }
+              currentPlanning.days[ds][member] = dayData;
+            });
+          };
+
+          weekLabelTd.onclick = () => {
+            const daysInWeek = getDaysInWeek();
+            let bulkVal = null;
+            if (selectedStatus === 'place') {
+              bulkVal = prompt(`Set Place for all members for this week:`, '');
+              if (bulkVal === null) return;
+            } else if (selectedStatus === 'freetext') {
+              bulkVal = prompt(`Enter Free Text for all members for this week:`, '');
+              if (bulkVal === null) return;
+            }
+
+            memberListOrdered.forEach(mObj => {
+              applyToMemberInWeek(mObj.name, daysInWeek, bulkVal);
+            });
+            renderPlanning();
+            triggerAutosave();
+          };
+          weekTr.appendChild(weekLabelTd);
+
+          memberListOrdered.forEach(mObj => {
+            const member = mObj.name;
+            const weekMemberTd = document.createElement('td');
+            weekMemberTd.style.cursor = 'pointer';
+            weekMemberTd.style.backgroundColor = '#eff6ff';
+            weekMemberTd.title = `Click to apply selected status/info to ${member} for this whole week`;
+            weekMemberTd.onclick = () => {
+              const daysInWeek = getDaysInWeek();
+              applyToMemberInWeek(member, daysInWeek);
+              renderPlanning();
+              triggerAutosave();
+            };
+            weekTr.appendChild(weekMemberTd);
+          });
+          
+          tableBody.appendChild(weekTr);
+        }
+
+        const tr = document.createElement('tr');
+        if (d.getDay() === 0 || d.getDay() === 6) tr.classList.add('weekend');
+        
+        const dateTd = document.createElement('td');
+        const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+        dateTd.textContent = `${dayName}, ${d.getDate()}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+        dateTd.style.cursor = 'pointer';
+        dateTd.title = 'Click to apply selected status to all members for this day';
+        dateTd.onclick = () => {
+          if (!currentPlanning.days[dateStr]) currentPlanning.days[dateStr] = {};
+          
+          let dayVal = null;
+          if (selectedStatus === 'readiness') {
+            // Check if all members already have 'Readiness'
+            const allHaveReadiness = memberListOrdered.every(mO => {
+              const dD = currentPlanning.days[dateStr][mO.name];
+              return dD && (typeof dD === 'object') && dD.readiness === 'Readiness';
+            });
+            dayVal = allHaveReadiness ? null : 'Readiness';
+          } else if (selectedStatus === 'place') {
+            dayVal = prompt(`Set Place for all members on ${dateStr}:`, '');
+            if (dayVal === null) return;
+          } else if (selectedStatus === 'freetext') {
+            dayVal = prompt(`Enter Free Text for all members on ${dateStr}:`, '');
+            if (dayVal === null) return;
+          }
+
+          memberListOrdered.forEach(mObj => {
+            const member = mObj.name;
+            let dayData = currentPlanning.days[dateStr][member];
+            if (typeof dayData !== 'object' || dayData === null) {
+              dayData = { status: dayData || 'none' };
+            }
+
+            if (selectedStatus === 'readiness') {
+              dayData.readiness = dayVal;
+            } else if (selectedStatus === 'place') {
+              dayData.place = dayVal;
+            } else if (selectedStatus === 'freetext') {
+              // Check if all members already have 'freetext'
+              const allSame = memberListOrdered.every(mO => {
+                const dD = currentPlanning.days[dateStr][mO.name] || 'none';
+                const cS = (typeof dD === 'object') ? dD.status : dD;
+                return cS === 'freetext';
+              });
+              if (allSame) {
+                dayData.status = 'none';
+                delete dayData.freetext;
+              } else {
+                dayData.status = 'freetext';
+                dayData.freetext = dayVal;
+              }
+            } else {
+              // Check if all members already have the selectedStatus (if it's a status)
+              const allSame = memberListOrdered.every(mO => {
+                const dD = currentPlanning.days[dateStr][mO.name] || 'none';
+                const cS = (typeof dD === 'object') ? dD.status : dD;
+                return cS === selectedStatus;
+              });
+              dayData.status = allSame ? 'none' : selectedStatus;
+            }
+            currentPlanning.days[dateStr][member] = dayData;
+          });
+          renderPlanning();
+          triggerAutosave();
+        };
+        tr.appendChild(dateTd);
+        
+        memberListOrdered.forEach(mObj => {
+          const member = mObj.name;
+          const td = document.createElement('td');
+          td.className = 'planning-cell';
+          const dayData = (currentPlanning.days[dateStr] && currentPlanning.days[dateStr][member]) || 'none';
+          const status = (typeof dayData === 'object') ? dayData.status : dayData;
+          const readiness = (typeof dayData === 'object') ? dayData.readiness : '';
+          const place = (typeof dayData === 'object') ? dayData.place : '';
+          
+          td.classList.add('status-' + status);
+
+          const contentDiv = document.createElement('div');
+          contentDiv.className = 'planning-cell-content';
+          td.appendChild(contentDiv);
+
+          // Left Sidebar for Readiness (20%)
+          const rSidebar = document.createElement('div');
+          rSidebar.className = 'cell-readiness-sidebar';
+          if (readiness) {
+            rSidebar.textContent = readiness;
+          } else {
+            rSidebar.style.background = 'transparent';
+            rSidebar.style.border = 'none';
+          }
+          contentDiv.appendChild(rSidebar);
+          
+          // Main Content (60%)
+          const mainContent = document.createElement('div');
+          mainContent.className = 'cell-main-content';
+          if (status === 'freetext' && dayData.freetext) {
+            mainContent.textContent = dayData.freetext;
+          } else {
+            mainContent.textContent = STATUS_LABELS[status];
+          }
+          contentDiv.appendChild(mainContent);
+          
+          // Right Sidebar for Place (20%)
+          const pSidebar = document.createElement('div');
+          pSidebar.className = 'cell-place-sidebar';
+          if (place) {
+            pSidebar.textContent = place;
+          } else {
+            pSidebar.style.background = 'transparent';
+            pSidebar.style.border = 'none';
+          }
+          contentDiv.appendChild(pSidebar);
+          
+          td.onclick = (e) => {
+            if (!currentPlanning.days[dateStr]) currentPlanning.days[dateStr] = {};
+            let dayData = currentPlanning.days[dateStr][member] || 'none';
+            if (typeof dayData !== 'object' || dayData === null) {
+              dayData = { status: dayData || 'none' };
+            }
+            
+            if (selectedStatus === 'readiness') {
+              if (dayData.readiness === 'Readiness') {
+                delete dayData.readiness;
+              } else {
+                dayData.readiness = 'Readiness';
+              }
+            } else if (selectedStatus === 'place') {
+              const val = prompt(`Set Place for ${member} on ${dateStr}:`, dayData.place || '');
+              if (val !== null) dayData.place = val;
+            } else if (selectedStatus === 'freetext') {
+              const currentStatus = dayData.status || 'none';
+              if (currentStatus === 'freetext') {
+                dayData.status = 'none';
+                delete dayData.freetext;
+              } else {
+                const val = prompt(`Enter Free Text for ${member} on ${dateStr}:`, dayData.freetext || '');
+                if (val !== null) {
+                  dayData.status = 'freetext';
+                  dayData.freetext = val;
+                }
+              }
+            } else {
+              const currentStatus = dayData.status || 'none';
+              dayData.status = (selectedStatus === 'none') ? 'none' : ((currentStatus === selectedStatus) ? 'none' : selectedStatus);
+            }
+            
+            currentPlanning.days[dateStr][member] = dayData;
+            renderPlanning();
+            triggerAutosave();
+          };
+
+          tr.appendChild(td);
+        });
+        
+        tableBody.appendChild(tr);
+      }
+    }
+
+    async function savePlanning() {
+      const pi = piNameInput.value.trim();
+      if (!pi) return alert('Enter PI Name');
+      
+      currentPlanning.startDate = startDateInput.value;
+      currentPlanning.endDate = endDateInput.value;
+      
+      // Calculate capacity before saving
+      currentPlanning.calculatedCapacity = calculateCapacity();
+      
+      statusMsg.innerHTML = '<span class="loading">Saving...</span>';
+      try {
+        const res = await fetch('/api/planning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pi, data: currentPlanning })
+        });
+        const data = await res.json();
+        statusMsg.innerHTML = data.message || 'Saved.';
+      } catch (e) {
+        statusMsg.innerHTML = '<span class="error">Save failed</span>';
+      }
+    }
+
+    function calculateCapacity() {
+      // Very simple calculation: 8h per day unless status reduces capacity
+      // We need to group by iteration. For now we just use a placeholder grouping if iterations aren't defined.
+      
+      const capacity = {};
+      const pi = piNameInput.value.trim();
+      
+      const reductionMap = {};
+      planningTypes.forEach(t => {
+        reductionMap[t.id] = t.reduction !== undefined ? t.reduction : (t.type === 'absence' ? 100 : 0);
+      });
+
+      currentPlanning.members.forEach(member => {
+        capacity[member] = {};
+      });
+
+      // Simple iteration mapping: 14 days per iteration
+      const start = new Date(startDateInput.value);
+      const end = new Date(endDateInput.value);
+      
+      let dayCount = 0;
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const itNum = Math.floor(dayCount / 14) + 1;
+        const itName = `${pi}_${itNum.toString().padStart(2, '0')}`;
+        const dateStr = d.toISOString().split('T')[0];
+        const isWeekend = (d.getDay() === 0 || d.getDay() === 6);
+        
+        currentPlanning.members.forEach(member => {
+          if (!capacity[member][itName]) capacity[member][itName] = 0;
+          
+          const dayData = (currentPlanning.days[dateStr] && currentPlanning.days[dateStr][member]) || 'none';
+          const status = (typeof dayData === 'object') ? dayData.status : dayData;
+          const settings = (currentPlanning.memberSettings && currentPlanning.memberSettings[member]) || { hoursPerDay: 8, availability: 100, workingDays: [1,2,3,4,5] };
+          const isContractDay = settings.workingDays.includes(d.getDay());
+          
+          if (isContractDay) {
+            let baseHours = settings.hoursPerDay * (settings.availability / 100);
+            let reduction = reductionMap[status] || 0;
+            let actualHours = baseHours * (1 - (reduction / 100));
+            capacity[member][itName] += actualHours * 3600;
+          }
+        });
+        dayCount++;
+      }
+      
+      return capacity;
+    }
+
+    addMemberBtn.onclick = () => {
+      const name = memberInput.value.trim();
+      const team = teamSelect.value;
+      if (name && !currentPlanning.members.includes(name)) {
+        currentPlanning.members.push(name);
+        currentPlanning.members.sort();
+        if (!currentPlanning.teams[team]) currentPlanning.teams[team] = [];
+        currentPlanning.teams[team].push(name);
+        memberInput.value = '';
+        renderPlanning();
+        triggerAutosave();
+      }
+    };
+
+    addTeamBtn.onclick = () => {
+      const teamName = newTeamInput.value.trim();
+      if (teamName && !currentPlanning.teams[teamName]) {
+        currentPlanning.teams[teamName] = [];
+        newTeamInput.value = '';
+        renderPlanning();
+        triggerAutosave();
+      }
+    };
+
+    loadBtn.onclick = loadPlanning;
+    startDateInput.onchange = () => { renderPlanning(); triggerAutosave(); };
+    endDateInput.onchange = () => { renderPlanning(); triggerAutosave(); };
+
+    // Image upload handler
+    document.getElementById('memberImageInput').onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file || !currentMemberForImage) return;
+
+      const formData = new FormData();
+      // Append text fields BEFORE the file to ensure multer.diskStorage.filename can access req.body
+      formData.append('memberName', currentMemberForImage);
+      formData.append('image', file);
+
+      statusMsg.innerHTML = '<span class="loading">Uploading image...</span>';
+      try {
+        const res = await fetch('/api/planning/member/image', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (data.imageUrl) {
+          if (!currentPlanning.pictures) currentPlanning.pictures = {};
+          // Add a cache-buster to the URL to force the browser to reload the image
+          const cacheBuster = `?t=${new Date().getTime()}`;
+          currentPlanning.pictures[currentMemberForImage] = data.imageUrl + cacheBuster;
+          statusMsg.innerHTML = 'Image uploaded.';
+          renderPlanning();
+          triggerAutosave();
+        } else {
+          statusMsg.innerHTML = '<span class="error">Upload failed</span>';
+        }
+      } catch (err) {
+        console.error('Upload error:', err);
+        statusMsg.innerHTML = '<span class="error">Upload error</span>';
+      }
+      e.target.value = ''; // Reset file input
+      currentMemberForImage = null;
+    };
+
+    // Load last accessed PI on startup
+    window.addEventListener('DOMContentLoaded', async () => {
+      // Default dates to current day to 3 months from now
+      const start = new Date();
+      const end = new Date();
+      end.setMonth(start.getMonth() + 3);
+      startDateInput.value = start.toISOString().split('T')[0];
+      endDateInput.value = end.toISOString().split('T')[0];
+
+      try {
+        const res = await fetch('/api/planning/last');
+        const data = await res.json();
+        if (data.pi) {
+          piNameInput.value = data.pi;
+          loadPlanning();
+        }
+      } catch (e) {
+        console.error('Failed to load last PI', e);
+      }
+    });
+
   </script>
 </body>
 </html>

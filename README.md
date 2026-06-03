@@ -1,13 +1,10 @@
-# Jira Time Tracking (Simple Timesheet)
+# Jira PI Planning
 
-A minimal web application to log time against your open Jira issues and manage worklogs. Supports Jira Cloud (REST API v3) and Jira Server/Data Center (REST API v2).
+A web application for Team Member Planning and Capacity Planning in Jira.
 
 Features:
-- Lists your open Jira issues (assigned to you, not done)
-- Add worklog entries (date, start time, duration)
-- Weekly view: view, edit, and delete worklogs grouped by day (Mon–Sun) across your open issues; navigate weeks
-- PI Capacity Planning: visualize planned capacity vs. available capacity across iterations (sprints) for entire teams.
-- Excel Integration: parse team member capacity from uploaded Excel files.
+- **Team Member Planning**: Visualize and manage team member availability and absences across a PI.
+- **PI Capacity Planning**: Visualize planned capacity vs. available capacity across iterations (sprints) for entire teams.
 - Server-only credentials via .env; browser talks only to the local server
 
 ## Prerequisites
@@ -41,7 +38,6 @@ JIRA_PAT=your_pat_here
 # JIRA_AUTH_TYPE=bearer
 PORT=3000
 ```
-Optional: JIRA_ACCOUNT_ID if you need explicit author on worklogs.
 
 3. Install dependencies:
 ```
@@ -54,19 +50,39 @@ npm start
 ```
 Visit http://localhost:3000
 
-## Endpoints
-- GET /api/issues (accepts optional ?jql=... to override the default JQL)
-- GET /api/issues/:issueId/worklogs
-- POST /api/issues/:issueId/worklogs
-- PUT /api/issues/:issueId/worklogs/:worklogId
-- DELETE /api/issues/:issueId/worklogs/:worklogId
-- GET /api/health
-- GET /api/capacity?pi=<PI_NAME> (e.g. 26_04)
-- POST /api/capacity/upload (multipart/form-data with 'pi' and 'file' fields)
+## Running with Docker
 
-Notes:
-- The frontend shows a weekly timesheet (Mon–Sun), aggregating worklogs across your open issues. You can navigate weeks and edit/delete entries inline. New entries are added for the selected issue.
-- Auth auto-detection: if your JIRA_BASE_URL ends with .atlassian.net, the server defaults to Cloud (API v3 + Basic with email:API token). Otherwise it defaults to Server/DC (API v2). For Server/DC, it defaults to Bearer if JIRA_PAT is provided; otherwise Basic. You can override via JIRA_API_VERSION and JIRA_AUTH_TYPE.
+You can also run the application using Docker.
+
+### Option 1: Docker Compose (Recommended)
+
+1. Create a `.env` file with your Jira configuration (see [Setup](#setup)).
+2. Run:
+   ```bash
+   docker-compose up -d
+   ```
+3. The application will be available at `http://localhost:3001`.
+
+### Option 2: Docker Build
+
+1. Build the image:
+   ```bash
+   docker build -t jira-pi-planning .
+   ```
+2. Run the container, passing environment variables:
+   ```bash
+   docker run -d -p 3001:3001 \
+     -e JIRA_BASE_URL=https://your-domain.atlassian.net \
+     -e JIRA_EMAIL=you@example.com \
+     -e JIRA_PAT=your_pat_here \
+     jira-pi-planning
+   ```
+
+## Endpoints
+- GET /api/planning?pi=<PI_NAME>
+- POST /api/planning
+- GET /api/capacity?pi=<PI_NAME>
+- GET /api/health
 
 ## Security
 - The server uses either Basic auth (email + API token) for Cloud or Bearer (Personal Access Token) for Server/DC; keep your .env safe.
@@ -92,30 +108,18 @@ EXTRA_CA_DIR=C:\\Certs\\CorpCAs
 NODE_EXTRA_CA_CERTS=C:\\Certs\\corp-root.cer
 ```
 
-Notes:
-- TLS verification remains enabled (rejectUnauthorized=true).
-- The server also normalizes `JIRA_BASE_URL` to remove a trailing slash to avoid double `//` in requests.
-
 ## PI Capacity Planning
 The Capacity Planning page allows you to view the planned work (remaining estimates from Jira) against the available capacity for each team member.
 
 ### Iteration Naming
 Iterations are expected to follow the pattern `<PI_NAME>_<NUMBER>`. For example, PI `26_04` would have iterations `26_04_01`, `26_04_02`, etc.
 
-### Capacity Excel Configuration
-Available capacity is parsed from Excel files stored in the `example_files` directory. 
-- Filename pattern: `PI_CAPA_20<PI_NAME>.xlsx` (e.g., `PI_CAPA_2026_04.xlsx` for PI `26_04`).
-- The Excel should have:
-  - Row 1: Member names starting from Column E (index 4).
-  - Column A: Iteration names (e.g., `PI2026_04_01`).
-  - Column B: Row type. Rows with `CAPA` are used to extract available hours.
-- Fallback: If no Excel file is found or a member is missing, a default of 80 hours per iteration is used.
+### Capacity Configuration
+Available capacity is determined from the Planning data in the `example_files` directory. 
+- Fallback: If no planning data is found or a member is missing, a default of 80 hours per iteration is used.
 
 ### Color Scheme
 The capacity table uses colors to highlight resource allocation:
 - **Red**: Over-planned by more than 5%.
 - **Yellow**: Over-planned by 0% to 5%.
 - **Normal**: Within capacity.
-
-### Uploading Capacity
-You can upload the Excel file directly through the Capacity Planning interface. Enter the PI name, choose your `.xlsx` file, and click "Upload". The server will automatically rename and store it in the correct location.

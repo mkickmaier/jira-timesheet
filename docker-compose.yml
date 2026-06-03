@@ -1,0 +1,15 @@
+services:
+  jira-pi-planning:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - JIRA_BASE_URL=${JIRA_BASE_URL}
+      - JIRA_EMAIL=${JIRA_EMAIL}
+      - JIRA_PAT=${JIRA_PAT}
+      - JIRA_AUTH_TYPE=${JIRA_AUTH_TYPE:-bearer}
+      - PORT=3001
+    volumes:
+      - ./uploads:/usr/src/app/uploads
+      # Uncomment if you want to use a local .env file instead of environment variables above
+      # - .env:/usr/src/app/.env

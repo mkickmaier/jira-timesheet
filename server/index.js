@@ -4,32 +4,111 @@ const fetch = require('node-fetch');
 const path = require('path');
 const https = require('https');
 const fs = require('fs');
-const xlsx = require('xlsx');
 const multer = require('multer');
-const app = express();
-const PORT = process.env.PORT || 3000;
+const readline = require('readline');
+const { exec } = require('child_process');
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, '..', 'web')));
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+/**
+ * Prompts user for missing configuration and saves it to .env
+ */
+async function setupConfig() {
+  const envPath = path.join(process.pkg ? process.cwd() : path.join(__dirname, '..'), '.env');
+  
+  // Reload env if file exists (in case it was just created/updated)
+  if (fs.existsSync(envPath)) {
+    require('dotenv').config({ path: envPath });
+  }
+
+  let email = process.env.JIRA_EMAIL;
+  let pat = process.env.JIRA_PAT;
+  let baseUrl = process.env.JIRA_BASE_URL;
+
+  if (email && pat && baseUrl) return;
+
+  console.log('\n--- Jira Time Tracking Setup ---');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  const question = (query) => new Promise((resolve) => rl.question(query, resolve));
+
+  if (!baseUrl) {
+    baseUrl = await question('Enter Jira Base URL (e.g., https://your-domain.atlassian.net): ');
+    process.env.JIRA_BASE_URL = baseUrl;
+  }
+  if (!email) {
+    email = await question('Enter Jira E-Mail: ');
+    process.env.JIRA_EMAIL = email;
+  }
+  if (!pat) {
+    pat = await question('Enter Jira PAT (Personal Access Token): ');
+    process.env.JIRA_PAT = pat;
+  }
+
+  rl.close();
+
+  const envContent = [
+    `JIRA_BASE_URL=${baseUrl}`,
+    `JIRA_EMAIL=${email}`,
+    `JIRA_PAT=${pat}`,
+    `JIRA_AUTH_TYPE=bearer`,
+    `PORT=${PORT}`,
+    `EXTRA_CA_DIR=.\\Frequentis-Certificates`
+  ].join('\n');
+
+  try {
+    fs.writeFileSync(envPath, envContent, 'utf8');
+    console.log(`[CONFIG] Saved configuration to ${envPath}\n`);
+  } catch (err) {
+    console.error(`[CONFIG] Failed to save .env file: ${err.message}`);
+  }
+}
+
+async function startServer() {
+  await setupConfig();
+
+  // Re-evaluate constants after setup
+  const JIRA_BASE_URL = (process.env.JIRA_BASE_URL || '').replace(/\/$/, '');
+  const JIRA_EMAIL = process.env.JIRA_EMAIL || '';
+  const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN || '';
+  const JIRA_PAT = process.env.JIRA_PAT || '';
+  const JIRA_ACCOUNT_ID = process.env.JIRA_ACCOUNT_ID || '';
+  const IS_CLOUD = /\.atlassian\.net$/i.test(JIRA_BASE_URL);
+  const JIRA_API_VERSION = process.env.JIRA_API_VERSION || (IS_CLOUD ? '3' : '2');
+  const JIRA_AUTH_TYPE = (process.env.JIRA_AUTH_TYPE || (IS_CLOUD ? 'basic' : (JIRA_PAT ? 'bearer' : 'basic'))).toLowerCase();
+
+  app.use(express.json());
 
 // Basic config validation
 function requireEnv(name) {
   const v = process.env[name];
   if (!v) {
-    console.warn(`[CONFIG] Missing ${name}. Define it in .env`);
+    // console.warn(`[CONFIG] Missing ${name}. Define it in .env`);
   }
   return v;
 }
 
-const JIRA_BASE_URL = (requireEnv('JIRA_BASE_URL') || '').replace(/\/$/, ''); // normalize: no trailing slash
-const JIRA_EMAIL = process.env.JIRA_EMAIL || '';
-const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN || '';
-const JIRA_PAT = process.env.JIRA_PAT || '';
-const JIRA_ACCOUNT_ID = process.env.JIRA_ACCOUNT_ID || '';
-// Detect deployment type and API version
-const IS_CLOUD = /\.atlassian\.net$/i.test(JIRA_BASE_URL);
-const JIRA_API_VERSION = process.env.JIRA_API_VERSION || (IS_CLOUD ? '3' : '2');
-const JIRA_AUTH_TYPE = (process.env.JIRA_AUTH_TYPE || (IS_CLOUD ? 'basic' : (JIRA_PAT ? 'bearer' : 'basic'))).toLowerCase();
+// These are now inside startServer or accessed via process.env directly in routes
+function getJiraConfig() {
+  const baseUrl = (process.env.JIRA_BASE_URL || '').replace(/\/$/, '');
+  const isCloud = /\.atlassian\.net$/i.test(baseUrl);
+  const pat = process.env.JIRA_PAT || '';
+  const authType = (process.env.JIRA_AUTH_TYPE || (isCloud ? 'basic' : (pat ? 'bearer' : 'basic'))).toLowerCase();
+  return {
+    baseUrl,
+    email: process.env.JIRA_EMAIL || '',
+    apiToken: process.env.JIRA_API_TOKEN || '',
+    pat,
+    accountId: process.env.JIRA_ACCOUNT_ID || '',
+    isCloud,
+    apiVersion: process.env.JIRA_API_VERSION || (isCloud ? '3' : '2'),
+    authType
+  };
+}
 
 // HTTPS agent with optional extra CA(s)
 const EXTRA_CA_DIR = process.env.EXTRA_CA_DIR || '';
@@ -53,21 +132,27 @@ try {
 }
 const httpsAgent = caBundle ? new https.Agent({ ca: caBundle, rejectUnauthorized: true }) : undefined;
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
+// Multer for member pictures
+const memberPicStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dir = path.join(__dirname, '..', 'example_files');
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const dir = path.join(baseDir, 'uploads', 'members');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
     cb(null, dir);
   },
   filename: function (req, file, cb) {
-    // We'll rename it in the endpoint once we have the PI name
-    cb(null, 'temp_' + file.originalname);
+    const memberName = req.body.memberName || 'unknown';
+    const ext = path.extname(file.originalname);
+    // Sanitize member name for filename
+    const safeName = memberName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    // Use timestamp to ensure unique filename and avoid caching issues on replace
+    const timestamp = Date.now();
+    cb(null, `${safeName}_${timestamp}${ext}`);
   }
 });
-const upload = multer({ storage: storage });
+const uploadMemberPic = multer({ storage: memberPicStorage });
 
 function fetchWithAgent(url, options = {}) {
   const opts = { ...options };
@@ -87,226 +172,344 @@ async function parseResponse(r) {
 }
 
 function jiraHeaders() {
+  const config = getJiraConfig();
   const headers = {
     'Accept': 'application/json',
     'Content-Type': 'application/json'
   };
-  if (JIRA_AUTH_TYPE === 'bearer') {
-    if (!JIRA_PAT) console.warn('[CONFIG] Using bearer auth but JIRA_PAT is empty');
-    headers['Authorization'] = `Bearer ${JIRA_PAT}`;
+  if (config.authType === 'bearer') {
+    if (!config.pat) console.warn('[CONFIG] Using bearer auth but JIRA_PAT is empty');
+    headers['Authorization'] = `Bearer ${config.pat}`;
   } else {
-    if (!JIRA_EMAIL || !JIRA_API_TOKEN) console.warn('[CONFIG] Using basic auth but JIRA_EMAIL or JIRA_API_TOKEN is empty');
-    const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_API_TOKEN}`).toString('base64');
+    if (!config.email || !config.apiToken) console.warn('[CONFIG] Using basic auth but JIRA_EMAIL or JIRA_API_TOKEN is empty');
+    const auth = Buffer.from(`${config.email}:${config.apiToken}`).toString('base64');
     headers['Authorization'] = `Basic ${auth}`;
   }
   return headers;
 }
 
-/**
- * Parses capacity from Excel file matching PI name.
- * Expected format: PI_CAPA_<PI_NAME>.xlsx in example_files/
- */
-function getCapacityFromExcel(pi) {
-  try {
-    // Normalize PI name for filename (replace underscores with whatever is expected or just use as is)
-    // The user mentioned PI_CAPA_2026_04.xlsx for PI 26_04. 
-    // It seems they use 2026_04 in filename for 26_04 PI. 
-    // Let's try multiple patterns.
-    const possibleFilenames = [
-      `PI_CAPA_20${pi}.xlsx`,
-      `PI_CAPA_${pi}.xlsx`,
-      `PI_CAPA_20${pi.replace('_', '')}.xlsx`
-    ];
 
-    let filePath = '';
-    for (const name of possibleFilenames) {
-      const p = path.join(__dirname, '..', 'example_files', name);
-      if (fs.existsSync(p)) {
-        filePath = p;
-        break;
-      }
-    }
+// Extract capacity from Planning data
+function getCapacityFromPlanning(pi, iterationDates) {
+  const data = getPlanningData(pi);
+  console.log('[PLANNING] Extracting capacity from planning data:', data);
+  if (!data || !data.members || !data.days) return null;
 
-    if (!filePath) {
-      console.log(`[CAPACITY] No Excel file found for PI ${pi}`);
-      return null;
-    }
+  const types = getPlanningTypes();
+  const reductionMap = {};
+  types.forEach(t => {
+    reductionMap[t.id] = t.reduction !== undefined ? t.reduction : (t.type === 'absence' ? 100 : 0);
+  });
 
-    console.log(`[CAPACITY] Parsing Excel: ${filePath}`);
-    const workbook = xlsx.readFile(filePath);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+  const membersList = data.members;
+  const memberSettings = data.memberSettings || {};
+  const capacityMap = {}; // { memberName: { iterationName: capacityInSeconds } }
+  const dayBreakdown = {}; // { memberName: { iterationName: [{ date, status, reduction, baseHours, actualHours, isContractDay }] } }
 
-    if (!data.length) return null;
+  if (iterationDates && Object.keys(iterationDates).length > 0) {
+    for (const [itName, dates] of Object.entries(iterationDates)) {
+      if (!dates.startDate || !dates.endDate) continue;
 
-    // Row 0: Member names starting from col 4 (index 4)
-    const membersList = data[0].slice(4).filter(name => name !== null && name !== undefined);
-    const capacityMap = {}; // { memberName: { iterationName: capacityInSeconds } }
+      const s = new Date(dates.startDate);
+      const e = new Date(dates.endDate);
+      s.setHours(0, 0, 0, 0);
+      e.setHours(0, 0, 0, 0);
 
-    membersList.forEach(name => {
-      capacityMap[name] = {};
-    });
+      for (let d = new Date(s); d < e; d.setDate(d.getDate() + 1)) {
+        // Use local date components to avoid timezone shifts when generating the date string
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
 
-    // Iterate rows to find iterations and their CAPA
-    let currentIteration = null;
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      if (!row || !row.length) continue;
+        membersList.forEach(member => {
+          if (!capacityMap[member]) capacityMap[member] = {};
+          if (!capacityMap[member][itName]) capacityMap[member][itName] = 0;
+          if (!dayBreakdown[member]) dayBreakdown[member] = {};
+          if (!dayBreakdown[member][itName]) dayBreakdown[member][itName] = [];
 
-      // Check if this row starts an iteration (e.g. PI2026_04_01 in column 0)
-      if (row[0] && typeof row[0] === 'string' && row[0].startsWith('PI')) {
-        // Normalize iteration name: PI2026_04_01 -> 26_04_01
-        currentIteration = row[0].replace(/^PI20/, '').replace(/^PI/, '');
-      }
+          const dayData = (data.days[dateStr] && data.days[dateStr][member]) || 'none';
+          const status = (typeof dayData === 'object') ? dayData.status : dayData;
+          const settings = memberSettings[member] || { hoursPerDay: 8, availability: 100, workingDays: [1, 2, 3, 4, 5] };
+          const isContractDay = settings.workingDays.includes(d.getDay());
 
-      // Check for CAPA row
-      if (currentIteration && row[1] === 'CAPA') {
-        membersList.forEach((name, idx) => {
-          const val = row[idx + 4];
-          if (typeof val === 'number') {
-            capacityMap[name][currentIteration] = val * 3600; // convert hours to seconds
-          }
+          let baseHours = settings.hoursPerDay * (settings.availability / 100);
+          let reduction = reductionMap[status] || 0;
+          let actualHours = isContractDay ? (baseHours * (1 - (reduction / 100))) : 0;
+
+          capacityMap[member][itName] += Math.round(actualHours * 3600);
+
+          dayBreakdown[member][itName].push({
+            date: dateStr,
+            status,
+            reduction,
+            baseHours,
+            actualHours,
+            isContractDay
+          });
         });
       }
     }
 
     return {
       members: membersList,
-      capacity: capacityMap
+      capacity: capacityMap,
+      dayBreakdown: dayBreakdown
     };
+  }
+
+  // Fallback if no iterationDates provided
+  const piName = pi;
+  const startStr = data.startDate;
+  const endStr = data.endDate;
+
+  if (startStr && endStr) {
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      // Use local date components to avoid timezone shifts when generating the date string
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      const dayCount = Math.floor((d - start) / (24 * 60 * 60 * 1000));
+      const itNum = Math.floor(dayCount / 14) + 1;
+      const itName = `${piName}_${itNum.toString().padStart(2, '0')}`;
+
+      membersList.forEach(member => {
+        if (!capacityMap[member]) capacityMap[member] = {};
+        if (!capacityMap[member][itName]) capacityMap[member][itName] = 0;
+        if (!dayBreakdown[member]) dayBreakdown[member] = {};
+        if (!dayBreakdown[member][itName]) dayBreakdown[member][itName] = [];
+
+        const dayData = (data.days[dateStr] && data.days[dateStr][member]) || 'none';
+        const status = (typeof dayData === 'object') ? dayData.status : dayData;
+        const settings = memberSettings[member] || { hoursPerDay: 8, availability: 100, workingDays: [1, 2, 3, 4, 5] };
+        const isContractDay = settings.workingDays.includes(d.getDay());
+
+        let baseHours = settings.hoursPerDay * (settings.availability / 100);
+        let reduction = reductionMap[status] || 0;
+        let actualHours = isContractDay ? (baseHours * (1 - (reduction / 100))) : 0;
+
+        capacityMap[member][itName] += Math.round(actualHours * 3600);
+
+        dayBreakdown[member][itName].push({
+          date: dateStr,
+          status,
+          reduction,
+          baseHours,
+          actualHours,
+          isContractDay
+        });
+      });
+    }
+
+    return {
+      members: membersList,
+      capacity: capacityMap,
+      dayBreakdown: dayBreakdown
+    };
+  }
+
+  // Fallback: If we had a way to map dates to iterations, we could calculate it here.
+  // For now, the requirement is "An absence needs also a configuration how much it reduces a team members working hours as percentage."
+  // The UI should use this configuration when calculating capacity.
+
+  return null;
+}
+
+// Read planning JSON file
+function getPlanningData(pi) {
+  try {
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const dir = path.join(baseDir, 'example_files');
+    const filePath = path.join(dir, `PI_PLANNING_${pi}.json`);
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
   } catch (e) {
-    console.error('[CAPACITY] Excel parsing error:', e);
-    return null;
+    console.error('[PLANNING] Read error:', e);
+  }
+  return null;
+}
+
+// Save planning JSON file
+function savePlanningData(pi, data) {
+  try {
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const dir = path.join(baseDir, 'example_files');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `PI_PLANNING_${pi}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    saveLastPi(pi);
+    return true;
+  } catch (e) {
+    console.error('[PLANNING] Save error:', e);
+    return false;
   }
 }
 
-// List open issues assigned to the current user (or by JQL)
-app.get('/api/issues', async (req, res) => {
+// Get/Save last accessed PI
+function getLastPi() {
   try {
-    const jql = req.query.jql || 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC';
-    const url = `${JIRA_BASE_URL}/rest/api/${JIRA_API_VERSION}/search?jql=${encodeURIComponent(jql)}&maxResults=100`;
-    const r = await fetchWithAgent(url, { headers: jiraHeaders() });
-    const data = await parseResponse(r);
-    if (!r.ok) return res.status(r.status).json(data);
-    res.json((data.issues||[]).map(i => ({
-      id: i.id,
-      key: i.key,
-      summary: i.fields.summary,
-      issuetype: i.fields.issuetype?.name,
-      status: i.fields.status?.name,
-      project: i.fields.project?.key
-    })));
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed to fetch issues' });
-  }
-});
-
-// Get worklogs for an issue
-app.get('/api/issues/:issueId/worklogs', async (req, res) => {
-  try {
-    const { issueId } = req.params;
-    const url = `${JIRA_BASE_URL}/rest/api/${JIRA_API_VERSION}/issue/${issueId}/worklog`;
-    const r = await fetchWithAgent(url, { headers: jiraHeaders() });
-    const data = await parseResponse(r);
-    if (!r.ok) return res.status(r.status).json(data);
-    res.json(data.worklogs || []);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed to fetch worklogs' });
-  }
-});
-
-// Create worklog on an issue
-app.post('/api/issues/:issueId/worklogs', async (req, res) => {
-  try {
-    const { issueId } = req.params;
-    const { started, timeSpentSeconds } = req.body;
-    const body = {
-      started, // e.g. '2025-09-04T10:00:00.000+0000'
-      timeSpentSeconds,
-      author: JIRA_ACCOUNT_ID ? { accountId: JIRA_ACCOUNT_ID } : undefined
-    };
-    const url = `${JIRA_BASE_URL}/rest/api/${JIRA_API_VERSION}/issue/${issueId}/worklog`;
-    const r = await fetchWithAgent(url, { method: 'POST', headers: jiraHeaders(), body: JSON.stringify(body) });
-    const data = await parseResponse(r);
-    if (!r.ok) return res.status(r.status).json(data);
-    res.status(201).json(data);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed to create worklog' });
-  }
-});
-
-// Update worklog
-app.put('/api/issues/:issueId/worklogs/:worklogId', async (req, res) => {
-  try {
-    const { issueId, worklogId } = req.params;
-    const { started, timeSpentSeconds } = req.body;
-    const body = {
-      started,
-      timeSpentSeconds
-    };
-    const url = `${JIRA_BASE_URL}/rest/api/${JIRA_API_VERSION}/issue/${issueId}/worklog/${worklogId}`;
-    const r = await fetchWithAgent(url, { method: 'PUT', headers: jiraHeaders(), body: JSON.stringify(body) });
-    const data = await parseResponse(r);
-    if (!r.ok) return res.status(r.status).json(data);
-    res.json(data);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed to update worklog' });
-  }
-});
-
-// Delete worklog
-app.delete('/api/issues/:issueId/worklogs/:worklogId', async (req, res) => {
-  try {
-    const { issueId, worklogId } = req.params;
-    const url = `${JIRA_BASE_URL}/rest/api/${JIRA_API_VERSION}/issue/${issueId}/worklog/${worklogId}`;
-    const r = await fetchWithAgent(url, { method: 'DELETE', headers: jiraHeaders() });
-    if (!r.ok) {
-      const data = await parseResponse(r).catch(() => ({}));
-      return res.status(r.status).json(data);
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const filePath = path.join(baseDir, 'example_files', 'last_pi.json');
+    if (fs.existsSync(filePath)) {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      return data.pi || '';
     }
-    res.status(204).send();
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed to delete worklog' });
+    console.error('[PLANNING] Read last PI error:', e);
+  }
+  return '';
+}
+
+function getPlanningTypes() {
+  try {
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const filePath = path.join(baseDir, 'example_files', 'planning_types.json');
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+  } catch (e) {
+    console.error('[PLANNING] Read types error:', e);
+  }
+  // Default types
+  return [
+    { id: 'none', label: '', color: '#fff', type: 'absence', reduction: 0 },
+    { id: 'ooo', label: 'OoO', color: '#7030a0', type: 'absence', reduction: 100 },
+    { id: 'urlaub', label: 'Urlaub', color: '#a6a6a6', type: 'absence', reduction: 100 },
+    { id: 'feiertag', label: 'Feiertag', color: '#7030a0', type: 'absence', reduction: 100 },
+    { id: 'ho', label: 'HO', color: '#92d050', type: 'information', reduction: 0 },
+    { id: 'planning', label: 'Planning', color: '#ffff00', type: 'information', reduction: 0 },
+    { id: 'sbb', label: 'SBB', color: '#ffccff', type: 'information', reduction: 0 },
+    { id: 'rollout', label: 'Rollout', color: '#00b0f0', type: 'information', reduction: 0 },
+    { id: 'release', label: 'Release', color: '#00ffff', type: 'information', reduction: 0 },
+    { id: 'freetext', label: 'Free Text', color: '#ff9900', type: 'information', reduction: 0 }
+  ];
+}
+
+function savePlanningTypes(types) {
+  try {
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const dir = path.join(baseDir, 'example_files');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, 'planning_types.json');
+    fs.writeFileSync(filePath, JSON.stringify(types, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('[PLANNING] Save types error:', e);
+    return false;
+  }
+}
+
+function saveLastPi(pi) {
+  try {
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const dir = path.join(baseDir, 'example_files');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, 'last_pi.json');
+    fs.writeFileSync(filePath, JSON.stringify({ pi }, null, 2), 'utf8');
+  } catch (e) {
+    console.error('[PLANNING] Save last PI error:', e);
+  }
+}
+
+// Get planning data for a PI
+app.get('/api/planning', (req, res) => {
+  const { pi } = req.query;
+  if (!pi) return res.status(400).json({ error: 'PI name is required' });
+  const data = getPlanningData(pi) || { pi, members: [], days: {} };
+  saveLastPi(pi);
+  res.json(data);
+});
+
+// Get the last accessed PI name
+app.get('/api/planning/last', (req, res) => {
+  const pi = getLastPi();
+  res.json({ pi });
+});
+
+// Get planning types
+app.get('/api/planning/types', (req, res) => {
+  res.json(getPlanningTypes());
+});
+
+// Save planning types
+app.post('/api/planning/types', (req, res) => {
+  const types = req.body;
+  if (!Array.isArray(types)) return res.status(400).json({ error: 'Types must be an array' });
+  if (savePlanningTypes(types)) {
+    res.json({ message: 'Types saved successfully' });
+  } else {
+    res.status(500).json({ error: 'Failed to save types' });
   }
 });
 
-// Upload capacity Excel file
-app.post('/api/capacity/upload', upload.single('file'), (req, res) => {
+// Sync members from Jira for a PI
+app.get('/api/planning/members', async (req, res) => {
   try {
-    const { pi } = req.body;
+    const config = getJiraConfig();
+    const { pi } = req.query;
     if (!pi) return res.status(400).json({ error: 'PI name is required' });
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const ext = path.extname(req.file.originalname);
-    if (ext !== '.xlsx') {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Only .xlsx files are allowed' });
+    const memberSet = new Set();
+    let iterationNum = 1;
+    let keepFetching = true;
+
+    while (keepFetching) {
+      const sprintName = `${pi}_${String(iterationNum).padStart(2, '0')}`;
+      const searchJql = `sprint = "${sprintName}"`;
+      const searchUrl = `${config.baseUrl}/rest/api/${config.apiVersion}/search?jql=${encodeURIComponent(searchJql)}&fields=assignee&maxResults=1000`;
+      
+      console.log(`[PLANNING] Syncing members from Iteration ${iterationNum}: ${sprintName}`);
+      const r = await fetchWithAgent(searchUrl, { headers: jiraHeaders() });
+      const data = await parseResponse(r);
+      
+      if (!r.ok) {
+        keepFetching = false;
+        break;
+      }
+
+      const issues = data.issues || [];
+      if (issues.length === 0) {
+        keepFetching = false;
+      } else {
+        issues.forEach(issue => {
+          const assignee = issue.fields.assignee;
+          if (assignee) {
+            const assigneeName = assignee.displayName || assignee.name;
+            if (assigneeName) memberSet.add(assigneeName);
+          }
+        });
+        iterationNum++;
+      }
+      if (iterationNum > 50) keepFetching = false;
     }
 
-    // Expected format: PI_CAPA_20<pi>.xlsx
-    const newFileName = `PI_CAPA_20${pi}.xlsx`;
-    const newPath = path.join(__dirname, '..', 'example_files', newFileName);
-
-    // If file exists, it will be overwritten
-    fs.renameSync(req.file.path, newPath);
-
-    console.log(`[CAPACITY] Uploaded and saved: ${newFileName}`);
-    res.json({ message: 'File uploaded successfully', filename: newFileName });
+    res.json({ members: Array.from(memberSet).sort() });
   } catch (e) {
-    console.error('[CAPACITY] Upload error:', e);
-    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    res.status(500).json({ error: 'Failed to upload file' });
+    console.error(e);
+    res.status(500).json({ error: 'Failed to sync members' });
+  }
+});
+
+// Save planning data for a PI
+app.post('/api/planning', (req, res) => {
+  const { pi, data } = req.body;
+  if (!pi || !data) return res.status(400).json({ error: 'PI and data are required' });
+  if (savePlanningData(pi, data)) {
+    res.json({ message: 'Planning saved successfully' });
+  } else {
+    res.status(500).json({ error: 'Failed to save planning' });
   }
 });
 
 // Get capacity data for a PI
 app.get('/api/capacity', async (req, res) => {
   try {
+    const config = getJiraConfig();
     const { pi } = req.query;
     if (!pi) return res.status(400).json({ error: 'PI name is required' });
 
@@ -315,21 +518,21 @@ app.get('/api/capacity', async (req, res) => {
     // until the query returns no items, because JQL doesn't support placeholders for sprints.
     const allIssues = [];
     const iterationsFound = new Set();
+    const iterationDates = {}; // { sprintName: { startDate, endDate } }
     let iterationNum = 1;
     let keepFetching = true;
 
     while (keepFetching) {
       const sprintName = `${pi}_${String(iterationNum).padStart(2, '0')}`;
       const searchJql = `sprint = "${sprintName}"`;
-      const searchUrl = `${JIRA_BASE_URL}/rest/api/${JIRA_API_VERSION}/search?jql=${encodeURIComponent(searchJql)}&fields=summary,assignee,timeestimate,customfield_10020,customfield_10001,sprint&maxResults=1000`;
+      // Request *navigable to ensure we get the sprint field regardless of its ID
+      const searchUrl = `${config.baseUrl}/rest/api/${config.apiVersion}/search?jql=${encodeURIComponent(searchJql)}&fields=summary,assignee,timeestimate,status,sprint,*navigable&expand=names&maxResults=1000`;
       
       console.log(`[CAPACITY] Fetching Iteration ${iterationNum}: ${sprintName}`);
       const r = await fetchWithAgent(searchUrl, { headers: jiraHeaders() });
       const data = await parseResponse(r);
       
       if (!r.ok) {
-        // If one fails, we log it but might want to stop or continue. 
-        // Usually, if it's 400 because sprint doesn't exist, it means we reached the end.
         console.warn(`[CAPACITY] Iteration ${sprintName} fetch stopped or failed:`, data.errorMessages || data.message);
         keepFetching = false;
         break;
@@ -341,19 +544,94 @@ app.get('/api/capacity', async (req, res) => {
         keepFetching = false;
       } else {
         console.log(`[CAPACITY] Found ${issues.length} issues for ${sprintName}`);
-        // Attach the sprint name to each issue so we don't have to guess it later from complex fields
+
+        // Try to extract dates from any field that looks like a sprint and matches the sprintName
+        if (!iterationDates[sprintName]) {
+          let sprintInfo = null;
+          
+          // First, identify the sprint field ID dynamically if not already known
+          let sprintFieldId = 'sprint';
+          if (data.names) {
+            const foundId = Object.keys(data.names).find(key => data.names[key].toLowerCase() === 'sprint');
+            if (foundId) sprintFieldId = foundId;
+          }
+
+          for (const issue of issues) {
+            // Check common fields first
+            const potentialFields = [sprintFieldId, 'sprint', 'customfield_10020', 'customfield_10001'];
+            
+            for (const fId of potentialFields) {
+              const val = issue.fields[fId];
+              if (!val) continue;
+
+              // Sprint info can be an object, a string, or an array of either
+              const arr = Array.isArray(val) ? val : [val];
+              for (const item of arr) {
+                if (typeof item === 'object' && item !== null) {
+                  // Jira Cloud style object
+                  // If we have multiple sprints, we MUST match by name if provided
+                  if (item.name === sprintName) {
+                    if (item.startDate && item.endDate) {
+                      sprintInfo = item;
+                      break;
+                    }
+                  } else if (!item.name && item.startDate && item.endDate) {
+                    // Fallback if name is missing but dates are present (unlikely in Cloud)
+                    sprintInfo = item;
+                  }
+                } else if (typeof item === 'string') {
+                  // Jira On-Premise style string
+                  // Example: com.atlassian.greenhopper.service.sprint.Sprint@...[id=1,rapidViewId=1,state=ACTIVE,name=PI_26_06_01,startDate=2026-04-01T12:00:00.000+02:00,endDate=2026-04-15T12:00:00.000+02:00,completeDate=<null>,sequence=1]
+                  if (item.includes('name=' + sprintName)) {
+                    if (item.includes('startDate=')) {
+                      sprintInfo = item;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (sprintInfo) break;
+            }
+            if (sprintInfo) break;
+          }
+
+          if (sprintInfo) {
+            if (typeof sprintInfo === 'string') {
+              const startMatch = sprintInfo.match(/startDate=([^,\]]+)/);
+              const endMatch = sprintInfo.match(/endDate=([^,\]]+)/);
+              let sD = startMatch ? startMatch[1] : null;
+              let eD = endMatch ? endMatch[1] : null;
+              if (sD === '<null>') sD = null;
+              if (eD === '<null>') eD = null;
+              
+              if (sD || eD) {
+                iterationDates[sprintName] = { startDate: sD, endDate: eD };
+              }
+            } else {
+              iterationDates[sprintName] = {
+                startDate: sprintInfo.startDate,
+                endDate: sprintInfo.endDate
+              };
+            }
+            console.log(`[CAPACITY] Extracted dates for ${sprintName}:`, iterationDates[sprintName]);
+          } else {
+            console.warn(`[CAPACITY] Could not extract dates for sprint ${sprintName} from any issues.`);
+          }
+        }
+
+        // Attach the sprint name to each issue
         issues.forEach(i => i._sprintName = sprintName);
         allIssues.push(...issues);
         iterationsFound.add(sprintName);
         iterationNum++;
       }
       
-      // Safety break to avoid infinite loops
       if (iterationNum > 50) keepFetching = false;
     }
 
     const members = {};
     const iterations = new Set();
+    const issueDetails = {}; // { memberName: { iterationName: [{ key, summary, estimate }] } }
 
     allIssues.forEach(issue => {
       const assignee = issue.fields.assignee;
@@ -374,20 +652,31 @@ app.get('/api/capacity', async (req, res) => {
           members[assigneeName].capacity[sprintName] = 0;
         }
         members[assigneeName].capacity[sprintName] += remainingEstimate;
+
+        if (!issueDetails[assigneeName]) issueDetails[assigneeName] = {};
+        if (!issueDetails[assigneeName][sprintName]) issueDetails[assigneeName][sprintName] = [];
+        issueDetails[assigneeName][sprintName].push({
+          key: issue.key,
+          summary: issue.fields.summary,
+          estimate: remainingEstimate
+        });
       }
     });
 
     const sortedIterations = Array.from(iterations).sort();
     const membersArray = Object.values(members).sort((a, b) => a.name.localeCompare(b.name));
 
-    // Try to get baseline capacity from Excel
-    const excelData = getCapacityFromExcel(pi);
+    // Try to get baseline capacity from Planning JSON
+    const baselineData = getCapacityFromPlanning(pi, iterationDates);
 
     res.json({
       pi,
       iterations: sortedIterations,
+      iterationDates,
       members: membersArray,
-      baselineCapacity: excelData
+      baselineCapacity: baselineData,
+      issueDetails,
+      jiraBaseUrl: config.baseUrl
     });
   } catch (e) {
     console.error(e);
@@ -395,17 +684,41 @@ app.get('/api/capacity', async (req, res) => {
   }
 });
 
-// Config endpoint
-app.get('/api/config', (_, res) => res.json({ jiraBaseUrl: JIRA_BASE_URL }));
-
-// Simple health check
+// Health and Config
+app.get('/api/config', (_, res) => res.json({ jiraBaseUrl: getJiraConfig().baseUrl }));
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
+// Upload member picture
+app.post('/api/planning/member/image', uploadMemberPic.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+  const imageUrl = `/uploads/members/${req.file.filename}`;
+  res.json({ imageUrl });
+});
+
+// Serve uploads
+const uploadsDir = process.pkg ? path.join(process.cwd(), 'uploads') : path.join(__dirname, '..', 'uploads');
+app.use('/uploads', express.static(uploadsDir));
+
 // Fallback to index.html for client routes
+const webDir = process.pkg ? path.join(__dirname, '..', 'web') : path.join(__dirname, '..', 'web');
+app.use(express.static(webDir));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'web', 'index.html'));
 });
 
+function openBrowser(url) {
+  const start = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  exec(`${start} ${url}`);
+}
+
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  const url = `http://localhost:${PORT}`;
+  console.log(`Server running on ${url}`);
+  openBrowser(url);
+});
+}
+
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

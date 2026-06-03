@@ -15,18 +15,54 @@
     table { width: 100%; border-collapse: collapse; margin-top: 16px; }
     th, td { text-align: left; padding: 10px; border: 1px solid #ddd; }
     th { background-color: #f0f4ff; }
+
+    /* Sticky Table Header */
+    thead {
+      left: 0;
+      background-color: #f0f4ff;
+      z-index: 12;
+      position: sticky;
+    }
+    
+    /* Sticky first column */
+    th:first-child, td:first-child {
+      min-width: 200px;
+    }
+    td:first-child {
+      background-color: #fff;
+      z-index: 11;
+    }
     .over-planned { background-color: #ffcccc; color: #b71c1c; font-weight: bold; }
     .warning-planned { background-color: #fff3cd; color: #856404; font-weight: bold; }
     .capacity-cell { text-align: center; }
     .total-row { font-weight: bold; background-color: #f9f9f9; }
     .loading { font-style: italic; color: #666; }
     .error { color: #b71c1c; padding: 10px; border: 1px solid #b71c1c; background: #ffeeee; border-radius: 4px; margin: 10px 0; }
+    .last-refreshed { font-size: 12px; color: #666; margin-top: 4px; }
+    
+    /* Modal styles */
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); }
+    .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 900px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+    .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+    .close:hover, .close:focus { color: black; text-decoration: none; cursor: pointer; }
+    .modal-header { border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 15px; }
+    .modal-section { margin-bottom: 20px; }
+    .modal-section h4 { margin-top: 0; border-left: 4px solid #0747a6; padding-left: 10px; }
+    .details-table { width: 100%; border-collapse: collapse; }
+    .details-table th, .details-table td { padding: 8px; border: 1px solid #eee; font-size: 14px; }
+    .details-table th { background: #f8f9fa; text-align: left; }
+    .clickable-cell { cursor: pointer; transition: background 0.2s; }
+    .clickable-cell:hover { background-color: #eef2ff !important; }
+    .day-off { color: #999; font-style: italic; background-color: #fafafa; }
   </style>
 </head>
 <body>
   <header>
     <h2>PI Capacity Planning</h2>
-    <a href="/">Timesheet</a>
+    <div>
+      <a href="/">Planning</a>
+      <a href="/capacity.html">Capacity</a>
+    </div>
   </header>
   <main>
     <div class="card">
@@ -34,20 +70,19 @@
         <label for="piName">PI Name (e.g. 26_04):</label>
         <input type="text" id="piName" placeholder="PI Name">
         <button id="loadBtn">Load Capacity</button>
-        <div style="margin-left: 20px; border-left: 1px solid #ccc; padding-left: 20px; display: flex; align-items: center; gap: 8px;">
-          <label for="fileInput" style="cursor: pointer; background: #eee; padding: 8px; border-radius: 4px; border: 1px solid #ccc;">Choose Excel File</label>
-          <input type="file" id="fileInput" accept=".xlsx" style="display: none">
-          <span id="fileNameDisplay" class="muted">No file chosen</span>
-          <button id="uploadBtn">Upload</button>
-        </div>
       </div>
     </div>
 
     <div id="status"></div>
 
     <div class="card" id="resultsCard" style="display:none">
-      <h3 id="piTitle"></h3>
-      <div style="overflow-x: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+        <div>
+          <h3 id="piTitle" style="margin: 0;"></h3>
+          <div id="lastRefreshed" class="last-refreshed"></div>
+        </div>
+      </div>
+      <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
         <table id="capacityTable">
           <thead>
             <tr id="tableHeader">
@@ -60,22 +95,61 @@
     </div>
   </main>
 
+  <!-- Details Modal -->
+  <div id="detailsModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeModal">&times;</span>
+      <div class="modal-header">
+        <h3 id="modalTitle">Capacity Details</h3>
+      </div>
+      <div id="modalBody">
+        <div class="modal-section">
+          <h4>Planned Tickets</h4>
+          <div id="ticketsList"></div>
+        </div>
+        <div class="modal-section">
+          <h4>Available Hours (Day by Day)</h4>
+          <div id="dailyCapacity"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const piNameInput = document.getElementById('piName');
     const loadBtn = document.getElementById('loadBtn');
-    const fileInput = document.getElementById('fileInput');
-    const fileNameDisplay = document.getElementById('fileNameDisplay');
-    const uploadBtn = document.getElementById('uploadBtn');
     const statusDiv = document.getElementById('status');
     const resultsCard = document.getElementById('resultsCard');
     const piTitle = document.getElementById('piTitle');
+    const lastRefreshedDisplay = document.getElementById('lastRefreshed');
     const tableHeader = document.getElementById('tableHeader');
     const tableBody = document.getElementById('tableBody');
+    const detailsModal = document.getElementById('detailsModal');
+    const closeModal = document.getElementById('closeModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const ticketsList = document.getElementById('ticketsList');
+    const dailyCapacity = document.getElementById('dailyCapacity');
+
+    let currentData = null;
 
     // Assume 8 hours per day, 5 days per week, 2 weeks per iteration = 80 hours
     // This is a fallback if no baseline capacity is found in Excel.
     const DEFAULT_CAPACITY_HOURS = 80; 
     const DEFAULT_CAPACITY_SECONDS = DEFAULT_CAPACITY_HOURS * 3600;
+
+    // Persist PI name
+    piNameInput.value = localStorage.getItem('lastPiName') || '';
+
+    // Load last cached data
+    const lastData = localStorage.getItem('lastCapacityData');
+    if (lastData) {
+      try {
+        currentData = JSON.parse(lastData);
+        renderTable(currentData);
+      } catch (e) {
+        console.warn('Failed to load cached capacity data:', e);
+      }
+    }
 
     function formatTime(seconds) {
       if (seconds === 0) return '0h';
@@ -84,10 +158,33 @@
       return `${h}h${m > 0 ? ' ' + m + 'm' : ''}`;
     }
 
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' });
+    }
+
     function getBaselineCapacity(data, memberName, iteration) {
       if (data.baselineCapacity && data.baselineCapacity.capacity[memberName]) {
         return data.baselineCapacity.capacity[memberName][iteration] || 0;
       }
+      
+      // Fallback: calculate based on iteration dates
+      const dates = data.iterationDates && data.iterationDates[iteration];
+      if (dates && dates.startDate && dates.endDate) {
+        const start = new Date(dates.startDate);
+        const end = new Date(dates.endDate);
+        let workdays = 0;
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const day = d.getDay();
+          if (day !== 0 && day !== 6) { // Skip Sat (6) and Sun (0)
+            workdays++;
+          }
+        }
+        return workdays * 8 * 3600; // 8 hours per day in seconds
+      }
+      
       return DEFAULT_CAPACITY_SECONDS;
     }
 
@@ -97,6 +194,8 @@
         statusDiv.innerHTML = '<div class="error">Please enter a PI name.</div>';
         return;
       }
+
+      localStorage.setItem('lastPiName', pi);
 
       statusDiv.innerHTML = '<div class="loading">Fetching data from Jira...</div>';
       resultsCard.style.display = 'none';
@@ -114,6 +213,13 @@
           statusDiv.innerHTML = '<div class="error">No iterations found for this PI.</div>';
           return;
         }
+        
+        currentData = data;
+        if (data.jiraBaseUrl) {
+            localStorage.setItem('jiraBaseUrl', data.jiraBaseUrl);
+        }
+        data.refreshTimestamp = new Date().toLocaleString();
+        localStorage.setItem('lastCapacityData', JSON.stringify(data));
 
         statusDiv.innerHTML = '';
         renderTable(data);
@@ -124,6 +230,11 @@
 
     function renderTable(data) {
       piTitle.textContent = `Capacity Planning for PI: ${data.pi}`;
+      if (data.refreshTimestamp) {
+        lastRefreshedDisplay.textContent = `Last refreshed: ${data.refreshTimestamp}`;
+      } else {
+        lastRefreshedDisplay.textContent = '';
+      }
       
       // Clear headers except first
       while (tableHeader.cells.length > 1) {
@@ -133,8 +244,29 @@
       // Add iteration headers
       data.iterations.forEach(it => {
         const th = document.createElement('th');
-        th.textContent = it;
         th.className = 'capacity-cell';
+        
+        const itName = document.createElement('div');
+        itName.textContent = it;
+        th.appendChild(itName);
+        
+        const dates = data.iterationDates && data.iterationDates[it];
+        if (dates && (dates.startDate || dates.endDate)) {
+          const dateRange = document.createElement('div');
+          dateRange.style.fontSize = '0.75em';
+          dateRange.style.fontWeight = 'normal';
+          dateRange.style.color = '#666';
+          dateRange.textContent = `${formatDate(dates.startDate)} - ${formatDate(dates.endDate)}`;
+          th.appendChild(dateRange);
+        } else {
+          const noDates = document.createElement('div');
+          noDates.style.fontSize = '0.7em';
+          noDates.style.fontWeight = 'normal';
+          noDates.style.color = '#999';
+          noDates.textContent = '(no dates set)';
+          th.appendChild(noDates);
+        }
+        
         tableHeader.appendChild(th);
       });
 
@@ -163,7 +295,8 @@
           memberTotalCapacity += capacitySeconds;
           
           const td = document.createElement('td');
-          td.className = 'capacity-cell';
+          td.className = 'capacity-cell clickable-cell';
+          td.onclick = () => showDetails(member.name, it);
           
           const planSpan = document.createElement('div');
           planSpan.textContent = formatTime(plannedSeconds);
@@ -219,53 +352,73 @@
       resultsCard.style.display = 'block';
     }
 
-    async function uploadFile() {
-      const pi = piNameInput.value.trim();
-      if (!pi) {
-        statusDiv.innerHTML = '<div class="error">Please enter a PI name first to identify the file destination.</div>';
-        return;
-      }
-      if (!fileInput.files.length) {
-        statusDiv.innerHTML = '<div class="error">Please choose an Excel file to upload.</div>';
-        return;
-      }
-
-      const file = fileInput.files[0];
-      const formData = new FormData();
-      formData.append('pi', pi);
-      formData.append('file', file);
-
-      statusDiv.innerHTML = '<div class="loading">Uploading file...</div>';
-
-      try {
-        const res = await fetch('/api/capacity/upload', {
-          method: 'POST',
-          body: formData
+    function showDetails(memberName, iteration) {
+      if (!currentData) return;
+      
+      modalTitle.textContent = `Details for ${memberName} - Iteration ${iteration}`;
+      
+      // Render Tickets
+      const issues = (currentData.issueDetails && currentData.issueDetails[memberName] && currentData.issueDetails[memberName][iteration]) || [];
+      if (issues.length === 0) {
+        ticketsList.innerHTML = '<p>No tickets planned for this iteration.</p>';
+      } else {
+        let html = '<table class="details-table"><thead><tr><th>Key</th><th>Summary</th><th>Estimate</th></tr></thead><tbody>';
+        issues.forEach(issue => {
+          html += `<tr>
+            <td><a href="${localStorage.getItem('jiraBaseUrl') || ''}/browse/${issue.key}" target="_blank">${issue.key}</a></td>
+            <td>${issue.summary}</td>
+            <td>${formatTime(issue.estimate)}</td>
+          </tr>`;
         });
-        const data = await res.json();
-
-        if (!res.ok) {
-          statusDiv.innerHTML = `<div class="error">Upload failed: ${data.error || data.message || 'Unknown error'}</div>`;
-          return;
-        }
-
-        statusDiv.innerHTML = `<div style="color: #2e7d32; padding: 10px; border: 1px solid #2e7d32; background: #e8f5e9; border-radius: 4px; margin: 10px 0;">
-          ${data.message}. You can now load the capacity.
-        </div>`;
-      } catch (e) {
-        statusDiv.innerHTML = `<div class="error">Upload error: ${e.message}</div>`;
+        html += '</tbody></table>';
+        ticketsList.innerHTML = html;
       }
+      
+      // Render Daily Capacity
+      const breakdown = (currentData.baselineCapacity && currentData.baselineCapacity.dayBreakdown && 
+                         currentData.baselineCapacity.dayBreakdown[memberName] && 
+                         currentData.baselineCapacity.dayBreakdown[memberName][iteration]) || [];
+      
+      if (breakdown.length === 0) {
+        dailyCapacity.innerHTML = '<p>No daily capacity information available from planning.</p>';
+      } else {
+        let html = '<table class="details-table"><thead><tr><th>Date</th><th>Status</th><th>Hours</th></tr></thead><tbody>';
+        breakdown.forEach(day => {
+          const hours = day.isContractDay ? day.actualHours : 0;
+          const rowClass = !day.isContractDay ? 'day-off' : '';
+          
+          // Use a local date object to avoid timezone shifts when displaying the date string
+          const [y, m, d] = day.date.split('-').map(Number);
+          const localDate = new Date(y, m - 1, d);
+          const weekday = localDate.toLocaleDateString(undefined, {weekday: 'short'});
+
+          html += `<tr class="${rowClass}">
+            <td>${day.date} (${weekday})</td>
+            <td>${day.status === 'none' ? '-' : day.status}</td>
+            <td>${hours.toFixed(1)}h</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        dailyCapacity.innerHTML = html;
+      }
+      
+      detailsModal.style.display = 'block';
     }
+
+    closeModal.onclick = () => {
+      detailsModal.style.display = 'none';
+    };
+
+    window.onclick = (event) => {
+      if (event.target == detailsModal) {
+        detailsModal.style.display = 'none';
+      }
+    };
 
     loadBtn.addEventListener('click', loadCapacity);
     piNameInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') loadCapacity();
     });
-
-    fileInput.addEventListener('change', () => {
-      fileNameDisplay.textContent = fileInput.files.length ? fileInput.files[0].name : 'No file chosen';
-    });
-    uploadBtn.addEventListener('click', uploadFile);
   </script>
 </body>
 </html>
