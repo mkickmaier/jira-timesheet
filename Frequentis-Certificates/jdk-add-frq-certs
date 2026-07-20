@@ -1,0 +1,16 @@
+#!/bin/sh
+
+CERT_DIR="/c/workspace/Frequentis-Certificates"
+ROOT_CA_CER="${CERT_DIR}/frequentis-enterprise-root-ca.cer"
+ISSUING_CER="${CERT_DIR}/frequentis-enterprise-issuing.cer"
+STOREPASS="changeit"
+
+echo "removing old keys if present"
+keytool -delete -cacerts -alias frequentis_root_ca -storepass "${STOREPASS}"
+keytool -delete -cacerts -alias frequentis_issuing_ca -storepass "${STOREPASS}"
+
+echo "importing Frequentis Root CA"
+keytool -import -cacerts -alias frequentis_root_ca -storepass "${STOREPASS}" -file "${ROOT_CA_CER}" -noprompt
+
+echo "importing Frequentis Issuing CA"
+keytool -import -cacerts -alias frequentis_issuing_ca -storepass "${STOREPASS}" -file "${ISSUING_CER}"
