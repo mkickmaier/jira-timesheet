@@ -1,4 +1,27 @@
 require('dotenv').config();
+
+// Helper function to read secret from file (Podman/Docker secrets)
+function readSecret(secretName) {
+  const secretPath = `/run/secrets/${secretName}`;
+  try {
+    if (fs.existsSync(secretPath)) {
+      const secret = fs.readFileSync(secretPath, 'utf8').trim();
+      if (secret) {
+        console.log(`[SECRETS] Loaded ${secretName} from secret file`);
+        return secret;
+      }
+    }
+  } catch (err) {
+    console.error(`[SECRETS] Error reading secret ${secretName}: ${err.message}`);
+  }
+  return null;
+}
+
+// Load secrets into environment if available
+const jiraPat = readSecret('jira_pat');
+if (jiraPat) {
+  process.env.JIRA_PAT = jiraPat;
+}
 const express = require('express');
 const fetch = require('node-fetch');
 const path = require('path');

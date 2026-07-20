@@ -2,7 +2,7 @@ services:
   jira-pi-planning:
     build: .
     ports:
-      - "3001:3001"
+      #- "3001:3001"
     environment:
       - JIRA_BASE_URL=${JIRA_BASE_URL}
       - JIRA_EMAIL=${JIRA_EMAIL}
