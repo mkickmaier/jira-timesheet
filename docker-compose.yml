@@ -11,5 +11,6 @@ services:
       - PORT=3001
     volumes:
       - ./uploads:/usr/src/app/uploads
+      - ./data:/usr/src/app/data
       # Uncomment if you want to use a local .env file instead of environment variables above
       # - .env:/usr/src/app/.env
