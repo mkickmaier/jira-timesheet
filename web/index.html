@@ -396,7 +396,15 @@
           </label>
         </div>
       </div>
-      <div class="modal-actions">
+      <div style="margin-top: 20px; border-top: 1px solid #eedddd; padding-top: 12px;">
+        <h4 style="color: #cc0000; margin: 0 0 8px 0; font-size: 14px;">Danger Zone</h4>
+        <div class="modal-field" style="margin-bottom: 8px;">
+          <label style="font-size: 12px; color: #555;">Type member name to confirm deletion:</label>
+          <input type="text" id="deleteMemberNameConfirm" placeholder="Type name to confirm">
+        </div>
+        <button id="deleteMemberBtn" class="btn-danger" style="width: 100%; padding: 8px; border-radius: 4px; cursor: pointer; border: none; font-weight: bold; background-color: #cc0000; color: white;">Delete Member</button>
+      </div>
+      <div class="modal-actions" style="margin-top: 16px;">
         <div style="flex-grow: 1;"></div>
         <button id="cancelMemberSettingsBtn" class="btn-secondary">Cancel</button>
         <button id="saveMemberSettingsBtn" class="btn-primary">Save</button>
@@ -475,6 +483,8 @@
     const saveMemberSettingsBtn = document.getElementById('saveMemberSettingsBtn');
     const cancelMemberSettingsBtn = document.getElementById('cancelMemberSettingsBtn');
     const memberSettingsTitle = document.getElementById('memberSettingsTitle');
+    const deleteMemberBtn = document.getElementById('deleteMemberBtn');
+    const deleteMemberNameConfirm = document.getElementById('deleteMemberNameConfirm');
 
     let planningTypes = [];
     const typeEditorModal = document.getElementById('typeEditorModal');
@@ -497,7 +507,8 @@
     function openMemberSettings(memberName) {
       currentMemberForSettings = memberName;
       memberSettingsTitle.textContent = `Settings for ${memberName}`;
-      
+      deleteMemberNameConfirm.value = '';
+
       const settings = (currentPlanning.memberSettings && currentPlanning.memberSettings[memberName]) || {
         hoursPerDay: 8,
         availability: 100,
@@ -515,6 +526,44 @@
       memberSettingsModal.style.display = 'block';
       modalOverlay.style.display = 'block';
     }
+
+    deleteMemberBtn.onclick = () => {
+      if (!currentMemberForSettings) return;
+      const typedName = deleteMemberNameConfirm.value.trim();
+      const actualName = currentMemberForSettings.trim();
+
+      if (typedName !== actualName) {
+        alert(`Name mismatch. Please type exactly: "${actualName}"`);
+        return;
+      }
+
+      if (confirm(`Are you absolutely sure you want to permanently delete ${actualName}? This action cannot be undone.`)) {
+        // Delete from currentPlanning.members
+        currentPlanning.members = currentPlanning.members.filter(mem => mem !== actualName);
+
+        // Delete from currentPlanning.teams
+        Object.keys(currentPlanning.teams).forEach(teamName => {
+          currentPlanning.teams[teamName] = currentPlanning.teams[teamName].filter(tm => tm !== actualName);
+        });
+
+        // Clean up settings and pictures
+        if (currentPlanning.memberSettings) {
+          delete currentPlanning.memberSettings[actualName];
+        }
+        if (currentPlanning.pictures) {
+          delete currentPlanning.pictures[actualName];
+        }
+
+        // Close modal
+        memberSettingsModal.style.display = 'none';
+        modalOverlay.style.display = 'none';
+        currentMemberForSettings = null;
+
+        // Refresh and save
+        renderPlanning();
+        triggerAutosave();
+      }
+    };
 
     saveMemberSettingsBtn.onclick = () => {
       if (!currentMemberForSettings) return;
@@ -974,24 +1023,6 @@
           };
 
           th.appendChild(wrapper);
-
-          // Add delete button for member
-          const delBtn = document.createElement('button');
-          delBtn.textContent = '×';
-          delBtn.className = 'delete-btn';
-          delBtn.title = `Remove ${m}`;
-          delBtn.style.position = 'absolute';
-          delBtn.style.top = '2px';
-          delBtn.style.right = '2px';
-          delBtn.onclick = () => {
-            if (confirm(`Remove ${m}?`)) {
-              currentPlanning.members = currentPlanning.members.filter(mem => mem !== m);
-              currentPlanning.teams[teamName] = currentPlanning.teams[teamName].filter(tm => tm !== m);
-              renderPlanning();
-              triggerAutosave();
-            }
-          };
-          th.appendChild(delBtn);
           tableHeader.appendChild(th);
         });
       });
