@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // Helper function to read secret from file (Podman/Docker secrets)
@@ -24,9 +26,7 @@ if (jiraPat) {
 }
 const express = require('express');
 const fetch = require('node-fetch');
-const path = require('path');
 const https = require('https');
-const fs = require('fs');
 const multer = require('multer');
 const readline = require('readline');
 const { exec } = require('child_process');
@@ -783,7 +783,7 @@ app.use('/uploads', express.static(uploadsDir));
 // Fallback to index.html for client routes
 const webDir = process.pkg ? path.join(__dirname, '..', 'web') : path.join(__dirname, '..', 'web');
 app.use(express.static(webDir));
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, '..', 'web', 'index.html'));
 });
 
