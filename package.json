@@ -30,6 +30,6 @@
     "pkg": "^5.8.1"
   },
   "nodemonConfig": {
-    "ignore": ["**/example_files/**"]
+    "ignore": ["**/data/**"]
   }
 }

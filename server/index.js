@@ -319,29 +319,134 @@ function getCapacityFromPlanning(pi, iterationDates) {
   return null;
 }
 
-// Read planning JSON file
-function getPlanningData(pi) {
+// Read the permanent member and team configuration
+function getPermanentConfig() {
   try {
     const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
-    const dir = path.join(baseDir, 'example_files');
-    const filePath = path.join(dir, `PI_PLANNING_${pi}.json`);
+    const filePath = path.join(baseDir, 'data', 'member_and_team_config.json');
     if (fs.existsSync(filePath)) {
       return JSON.parse(fs.readFileSync(filePath, 'utf8'));
     }
+  } catch (e) {
+    console.error('[CONFIG] Read permanent config error:', e);
+  }
+  // Default fallback if absolutely nothing exists
+  return {
+    members: [],
+    teams: { 'Unassigned': [] },
+    memberSettings: {},
+    pictures: {}
+  };
+}
+
+// Save the permanent member and team configuration
+function savePermanentConfig(config) {
+  try {
+    const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+    const dir = path.join(baseDir, 'data');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, 'member_and_team_config.json');
+    fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('[CONFIG] Save permanent config error:', e);
+    return false;
+  }
+}
+
+function getDailyDataPath() {
+  const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
+  return path.join(baseDir, 'data', 'daily_data.json');
+}
+
+// Clean up days older than 90 days (3 months)
+function pruneOldDailyData(days) {
+  if (!days) return {};
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  ninetyDaysAgo.setHours(0, 0, 0, 0);
+
+  let prunedCount = 0;
+  for (const key of Object.keys(days)) {
+    const parts = key.split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        const keyDate = new Date(y, m - 1, d);
+        if (keyDate < ninetyDaysAgo) {
+          delete days[key];
+          prunedCount++;
+        }
+      }
+    }
+  }
+  if (prunedCount > 0) {
+    console.log(`[DAILY_DATA] Pruned ${prunedCount} daily status records older than 90 days.`);
+  }
+  return days;
+}
+
+// Read planning JSON file with merged permanent config
+function getPlanningData(pi) {
+  try {
+    const dailyDataPath = getDailyDataPath();
+    let fileData = {};
+    if (fs.existsSync(dailyDataPath)) {
+      fileData = JSON.parse(fs.readFileSync(dailyDataPath, 'utf8'));
+    }
+
+    if (fileData.days) {
+      fileData.days = pruneOldDailyData(fileData.days);
+    }
+
+    const permConfig = getPermanentConfig();
+
+    return {
+      pi,
+      startDate: fileData.startDate || '',
+      endDate: fileData.endDate || '',
+      days: fileData.days || {},
+      members: permConfig.members || [],
+      teams: permConfig.teams || {},
+      memberSettings: permConfig.memberSettings || {},
+      pictures: permConfig.pictures || {}
+    };
   } catch (e) {
     console.error('[PLANNING] Read error:', e);
   }
   return null;
 }
 
-// Save planning JSON file
+// Save planning JSON file splitting details into daily_data and permanent files
 function savePlanningData(pi, data) {
   try {
     const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
-    const dir = path.join(baseDir, 'example_files');
+    const dir = path.join(baseDir, 'data');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, `PI_PLANNING_${pi}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+
+    // Save permanent config fields
+    const permConfig = {
+      members: data.members || [],
+      teams: data.teams || {},
+      memberSettings: data.memberSettings || {},
+      pictures: data.pictures || {}
+    };
+    savePermanentConfig(permConfig);
+
+    // Prune before saving daily_data
+    let prunedDays = pruneOldDailyData(data.days || {});
+
+    // Save only to the daily_data file
+    const dailyData = {
+      startDate: data.startDate || '',
+      endDate: data.endDate || '',
+      days: prunedDays
+    };
+
+    const filePath = getDailyDataPath();
+    fs.writeFileSync(filePath, JSON.stringify(dailyData, null, 2), 'utf8');
     saveLastPi(pi);
     return true;
   } catch (e) {
@@ -354,7 +459,7 @@ function savePlanningData(pi, data) {
 function getLastPi() {
   try {
     const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
-    const filePath = path.join(baseDir, 'example_files', 'last_pi.json');
+    const filePath = path.join(baseDir, 'data', 'last_pi.json');
     if (fs.existsSync(filePath)) {
       const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       return data.pi || '';
@@ -368,7 +473,7 @@ function getLastPi() {
 function getPlanningTypes() {
   try {
     const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
-    const filePath = path.join(baseDir, 'example_files', 'planning_types.json');
+    const filePath = path.join(baseDir, 'data', 'planning_types.json');
     if (fs.existsSync(filePath)) {
       return JSON.parse(fs.readFileSync(filePath, 'utf8'));
     }
@@ -393,7 +498,7 @@ function getPlanningTypes() {
 function savePlanningTypes(types) {
   try {
     const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
-    const dir = path.join(baseDir, 'example_files');
+    const dir = path.join(baseDir, 'data');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, 'planning_types.json');
     fs.writeFileSync(filePath, JSON.stringify(types, null, 2), 'utf8');
@@ -407,7 +512,7 @@ function savePlanningTypes(types) {
 function saveLastPi(pi) {
   try {
     const baseDir = process.pkg ? process.cwd() : path.join(__dirname, '..');
-    const dir = path.join(baseDir, 'example_files');
+    const dir = path.join(baseDir, 'data');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, 'last_pi.json');
     fs.writeFileSync(filePath, JSON.stringify({ pi }, null, 2), 'utf8');
@@ -447,53 +552,6 @@ app.post('/api/planning/types', (req, res) => {
   }
 });
 
-// Sync members from Jira for a PI
-app.get('/api/planning/members', async (req, res) => {
-  try {
-    const config = getJiraConfig();
-    const { pi } = req.query;
-    if (!pi) return res.status(400).json({ error: 'PI name is required' });
-
-    const memberSet = new Set();
-    let iterationNum = 1;
-    let keepFetching = true;
-
-    while (keepFetching) {
-      const sprintName = `${pi}_${String(iterationNum).padStart(2, '0')}`;
-      const searchJql = `sprint = "${sprintName}"`;
-      const searchUrl = `${config.baseUrl}/rest/api/${config.apiVersion}/search?jql=${encodeURIComponent(searchJql)}&fields=assignee&maxResults=1000`;
-      
-      console.log(`[PLANNING] Syncing members from Iteration ${iterationNum}: ${sprintName}`);
-      const r = await fetchWithAgent(searchUrl, { headers: jiraHeaders() });
-      const data = await parseResponse(r);
-      
-      if (!r.ok) {
-        keepFetching = false;
-        break;
-      }
-
-      const issues = data.issues || [];
-      if (issues.length === 0) {
-        keepFetching = false;
-      } else {
-        issues.forEach(issue => {
-          const assignee = issue.fields.assignee;
-          if (assignee) {
-            const assigneeName = assignee.displayName || assignee.name;
-            if (assigneeName) memberSet.add(assigneeName);
-          }
-        });
-        iterationNum++;
-      }
-      if (iterationNum > 50) keepFetching = false;
-    }
-
-    res.json({ members: Array.from(memberSet).sort() });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed to sync members' });
-  }
-});
 
 // Save planning data for a PI
 app.post('/api/planning', (req, res) => {

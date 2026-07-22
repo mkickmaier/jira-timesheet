@@ -429,7 +429,6 @@
       icon.classList.toggle('collapsed');
     }
     const piNameInput = document.getElementById('piName');
-    const loadBtn = document.getElementById('loadBtn');
     const addMemberBtn = document.getElementById('addMemberBtn');
     const memberInput = document.getElementById('memberInput');
     const teamSelect = document.getElementById('teamSelect');
@@ -455,6 +454,13 @@
       const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
       const weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
       return weekNo;
+    }
+
+    function formatDateLocal(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
     }
 
     let currentPlanning = { pi: '', members: [], teams: {}, days: {}, pictures: {}, memberSettings: {} };
@@ -771,8 +777,33 @@
         // Migrate old data structure
         if (!currentPlanning.teams) currentPlanning.teams = {};
         if (!currentPlanning.memberSettings) currentPlanning.memberSettings = {};
-        if (currentPlanning.startDate) startDateInput.value = currentPlanning.startDate;
-        if (currentPlanning.endDate) endDateInput.value = currentPlanning.endDate;
+
+        const todayStr = formatDateLocal(new Date());
+        if (currentPlanning.startDate) {
+          if (currentPlanning.startDate < todayStr) {
+            startDateInput.value = todayStr;
+            const end = new Date();
+            end.setMonth(end.getMonth() + 3);
+            const defaultEndStr = formatDateLocal(end);
+            if (!currentPlanning.endDate || currentPlanning.endDate < defaultEndStr) {
+              endDateInput.value = defaultEndStr;
+            } else {
+              endDateInput.value = currentPlanning.endDate;
+            }
+            triggerAutosave();
+          } else {
+            startDateInput.value = currentPlanning.startDate;
+            if (currentPlanning.endDate) {
+              endDateInput.value = currentPlanning.endDate;
+            }
+          }
+        } else {
+          startDateInput.value = todayStr;
+          const end = new Date();
+          end.setMonth(end.getMonth() + 3);
+          endDateInput.value = formatDateLocal(end);
+          triggerAutosave();
+        }
 
         if (currentPlanning.members && currentPlanning.members.length > 0) {
           // If some members aren't in any team, put them in 'Unassigned'
@@ -794,30 +825,8 @@
           endDateInput.value = '';
         }
 
-        // Sync members from Jira
-        statusMsg.innerHTML = '<span class="loading">Syncing members from Jira...</span>';
-        try {
-          const jiraRes = await fetch(`/api/planning/members?pi=${encodeURIComponent(pi)}`);
-          const jiraData = await jiraRes.json();
-          if (jiraData.members) {
-            jiraData.members.forEach(m => {
-              if (!currentPlanning.members.includes(m)) {
-                currentPlanning.members.push(m);
-                // Put new Jira members in Unassigned
-                if (!currentPlanning.teams['Unassigned']) currentPlanning.teams['Unassigned'] = [];
-                if (!currentPlanning.teams['Unassigned'].includes(m)) {
-                  currentPlanning.teams['Unassigned'].push(m);
-                }
-              }
-            });
-            currentPlanning.members.sort();
-          }
-        } catch (je) {
-          console.error('Failed to sync members from Jira', je);
-        }
-
         renderPlanning();
-        statusMsg.innerHTML = 'Loaded and synced with Jira.';
+        statusMsg.innerHTML = 'Loaded successfully.';
       } catch (e) {
         statusMsg.innerHTML = '<span class="error">Failed to load</span>';
       }
@@ -855,19 +864,12 @@
       }
 
       if (!startDateInput.value || !endDateInput.value) {
-        // Try to guess dates from existing data if possible, else default to some range
-        if (Object.keys(currentPlanning.days).length > 0) {
-          const dates = Object.keys(currentPlanning.days).sort();
-          startDateInput.value = dates[0];
-          endDateInput.value = dates[dates.length - 1];
-        } else {
-          // Default range: 3 months from today
-          const start = new Date();
-          const end = new Date();
-          end.setMonth(start.getMonth() + 3);
-          startDateInput.value = start.toISOString().split('T')[0];
-          endDateInput.value = end.toISOString().split('T')[0];
-        }
+        // Default range: from today to today + 3 months
+        const start = new Date();
+        const end = new Date();
+        end.setMonth(start.getMonth() + 3);
+        startDateInput.value = formatDateLocal(start);
+        endDateInput.value = formatDateLocal(end);
       }
 
       planningCard.style.display = 'block';
@@ -1442,7 +1444,6 @@
       }
     };
 
-    loadBtn.onclick = loadPlanning;
     startDateInput.onchange = () => { renderPlanning(); triggerAutosave(); };
     endDateInput.onchange = () => { renderPlanning(); triggerAutosave(); };
 
@@ -1488,8 +1489,8 @@
       const start = new Date();
       const end = new Date();
       end.setMonth(start.getMonth() + 3);
-      startDateInput.value = start.toISOString().split('T')[0];
-      endDateInput.value = end.toISOString().split('T')[0];
+      startDateInput.value = formatDateLocal(start);
+      endDateInput.value = formatDateLocal(end);
 
       try {
         const res = await fetch('/api/planning/last');

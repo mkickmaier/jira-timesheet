@@ -115,7 +115,7 @@ The Capacity Planning page allows you to view the planned work (remaining estima
 Iterations are expected to follow the pattern `<PI_NAME>_<NUMBER>`. For example, PI `26_04` would have iterations `26_04_01`, `26_04_02`, etc.
 
 ### Capacity Configuration
-Available capacity is determined from the Planning data in the `example_files` directory. 
+Available capacity is determined from the Planning data in the `data` directory. 
 - Fallback: If no planning data is found or a member is missing, a default of 80 hours per iteration is used.
 
 ### Color Scheme
