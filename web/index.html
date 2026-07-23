@@ -936,14 +936,25 @@
           memberListOrdered.push({ name: m, team: teamName });
           const th = document.createElement('th');
           th.style.minWidth = '100px';
+          th.style.height = '130px';
+          th.style.padding = '8px 4px';
+          th.style.boxSizing = 'border-box';
 
           const wrapper = document.createElement('div');
           wrapper.style.display = 'flex';
           wrapper.style.flexDirection = 'column';
           wrapper.style.alignItems = 'center';
-          wrapper.style.justifyContent = 'center';
-          wrapper.style.gap = '4px';
-          
+          wrapper.style.justifyContent = 'space-between';
+          wrapper.style.height = '100%';
+          wrapper.style.boxSizing = 'border-box';
+
+          // Top container for photo and name
+          const topContainer = document.createElement('div');
+          topContainer.style.display = 'flex';
+          topContainer.style.flexDirection = 'column';
+          topContainer.style.alignItems = 'center';
+          topContainer.style.gap = '4px';
+
           // Profile Picture
           const picUrl = currentPlanning.pictures && currentPlanning.pictures[m];
           if (picUrl) {
@@ -955,7 +966,7 @@
               currentMemberForImage = m;
               document.getElementById('memberImageInput').click();
             };
-            wrapper.appendChild(img);
+            topContainer.appendChild(img);
           } else {
             const placeholder = document.createElement('div');
             placeholder.className = 'placeholder-pic';
@@ -965,7 +976,7 @@
               currentMemberForImage = m;
               document.getElementById('memberImageInput').click();
             };
-            wrapper.appendChild(placeholder);
+            topContainer.appendChild(placeholder);
           }
           
           const nameDiv = document.createElement('div');
@@ -978,7 +989,9 @@
           nameDiv.title = 'Click for settings, right-click to change team';
           nameDiv.className = 'team-name-editable';
           nameDiv.onclick = () => openMemberSettings(m);
-          wrapper.appendChild(nameDiv);
+          topContainer.appendChild(nameDiv);
+
+          wrapper.appendChild(topContainer);
 
           const settingsInfo = document.createElement('div');
           settingsInfo.style.fontSize = '9px';
