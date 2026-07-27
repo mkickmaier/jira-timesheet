@@ -382,11 +382,11 @@ function getDailyDataPath() {
   return path.join(baseDir, 'data', 'daily_data.json');
 }
 
-// Clean up days older than 90 days (3 months)
+// Clean up days older than 365 days (1 year)
 function pruneOldDailyData(days) {
   if (!days) return {};
   const ninetyDaysAgo = new Date();
-  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 365);
   ninetyDaysAgo.setHours(0, 0, 0, 0);
 
   let prunedCount = 0;
