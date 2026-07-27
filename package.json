@@ -2,34 +2,26 @@
   "name": "jira-pi-planning",
   "version": "1.0.0",
   "private": true,
-  "bin": "server/index.js",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
-    "debug": "set LOG_LEVEL=debug&& node --inspect server/index.js",
-    "build:exe": "pkg . --targets node18-win-x64 --output jira-pi-planning.exe"
-  },
-  "pkg": {
-    "scripts": [
-      "server/**/*.js"
-    ],
-    "assets": [
-      "web/**/*"
-    ]
+    "debug": "set LOG_LEVEL=debug&& node --inspect server/index.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "form-data": "^4.0.6",
     "multer": "^2.2.0",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14",
-    "pkg": "^5.8.1"
+    "nodemon": "^3.1.14"
   },
   "nodemonConfig": {
-    "ignore": ["**/data/**"]
+    "ignore": [
+      "**/data/**"
+    ]
   }
 }
