@@ -48,7 +48,10 @@ function getDayStatuses(dayData) {
   let morningStatus = 'none';
   let afternoonStatus = 'none';
   if (typeof dayData === 'object' && dayData !== null) {
-    if (dayData.morningStatus || dayData.afternoonStatus) {
+    if (dayData.status === 'freetext') {
+      morningStatus = 'freetext';
+      afternoonStatus = 'freetext';
+    } else if (dayData.morningStatus || dayData.afternoonStatus) {
       morningStatus = dayData.morningStatus || 'none';
       afternoonStatus = dayData.afternoonStatus || 'none';
     } else {
@@ -87,6 +90,17 @@ function isCellNotEmpty(dateStr, member) {
 
 let currentPlanning = { pi: '', members: [], teams: {}, days: {}, pictures: {}, memberSettings: {} };
 let selectedStatus = 'none';
+let lastPlaceInput = '';
+try {
+  lastPlaceInput = localStorage.getItem('lastPlaceInput') || '';
+} catch (e) {}
+
+function setLastPlaceInput(val) {
+  lastPlaceInput = val;
+  try {
+    localStorage.setItem('lastPlaceInput', val);
+  } catch (e) {}
+}
 let selectedDayPart = 'full';
 let saveTimeout;
 let currentMemberForImage = null;
@@ -964,14 +978,23 @@ function renderPlanning() {
               return;
             }
             const dD = currentPlanning.days[ds][member];
-            if (!(dD && (typeof dD === 'object') && dD.readiness === 'Readiness')) {
+            if (!dD || typeof dD !== 'object') {
               allHaveReadiness = false;
+              return;
+            }
+            if (selectedDayPart === 'morning') {
+              if (dD.morningReadiness !== 'Readiness') allHaveReadiness = false;
+            } else if (selectedDayPart === 'afternoon') {
+              if (dD.afternoonReadiness !== 'Readiness') allHaveReadiness = false;
+            } else {
+              if (dD.readiness !== 'Readiness') allHaveReadiness = false;
             }
           });
           val = allHaveReadiness ? null : 'Readiness';
         } else if (selectedStatus === 'place' && val === null) {
-          val = prompt(`Set Place for ${member} for this week:`, '');
+          val = prompt(`Set Place for ${member} for this week:`, lastPlaceInput);
           if (val === null) return; // Cancel
+          setLastPlaceInput(val);
         } else if (selectedStatus === 'freetext' && val === null) {
           val = prompt(`Enter Free Text for ${member} for this week:`, '');
           if (val === null) return; // Cancel
@@ -988,16 +1011,61 @@ function renderPlanning() {
           }
 
           if (selectedStatus === 'readiness') {
-            if (val === 'Readiness') {
-              dayData.readiness = val;
+            if (selectedDayPart === 'morning') {
+              if (val === 'Readiness') {
+                dayData.morningReadiness = val;
+              } else {
+                delete dayData.morningReadiness;
+              }
+              if (dayData.morningReadiness && dayData.afternoonReadiness) {
+                dayData.readiness = 'Readiness';
+              } else {
+                delete dayData.readiness;
+              }
+            } else if (selectedDayPart === 'afternoon') {
+              if (val === 'Readiness') {
+                dayData.afternoonReadiness = val;
+              } else {
+                delete dayData.afternoonReadiness;
+              }
+              if (dayData.morningReadiness && dayData.afternoonReadiness) {
+                dayData.readiness = 'Readiness';
+              } else {
+                delete dayData.readiness;
+              }
             } else {
-              delete dayData.readiness;
+              if (val === 'Readiness') {
+                dayData.readiness = val;
+                dayData.morningReadiness = val;
+                dayData.afternoonReadiness = val;
+              } else {
+                delete dayData.readiness;
+                delete dayData.morningReadiness;
+                delete dayData.afternoonReadiness;
+              }
             }
           } else if (selectedStatus === 'place') {
-            dayData.place = val;
+            if (selectedDayPart === 'morning') {
+              dayData.morningPlace = val;
+              if (!val) delete dayData.morningPlace;
+            } else if (selectedDayPart === 'afternoon') {
+              dayData.afternoonPlace = val;
+              if (!val) delete dayData.afternoonPlace;
+            } else {
+              dayData.place = val;
+              dayData.morningPlace = val;
+              dayData.afternoonPlace = val;
+              if (!val) {
+                delete dayData.place;
+                delete dayData.morningPlace;
+                delete dayData.afternoonPlace;
+              }
+            }
           } else if (selectedStatus === 'freetext') {
             dayData.status = 'freetext';
             dayData.freetext = val;
+            delete dayData.morningStatus;
+            delete dayData.afternoonStatus;
           } else {
             if (selectedDayPart === 'morning') {
               let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
@@ -1023,8 +1091,9 @@ function renderPlanning() {
         const daysInWeek = getDaysInWeek();
         let bulkVal = null;
         if (selectedStatus === 'place') {
-          bulkVal = prompt(`Set Place for all members for this week:`, '');
+          bulkVal = prompt(`Set Place for all members for this week:`, lastPlaceInput);
           if (bulkVal === null) return;
+          setLastPlaceInput(bulkVal);
         } else if (selectedStatus === 'freetext') {
           bulkVal = prompt(`Enter Free Text for all members for this week:`, '');
           if (bulkVal === null) return;
@@ -1126,13 +1195,17 @@ function renderPlanning() {
       if (selectedStatus === 'readiness') {
         // Check if all members already have 'Readiness'
         const allHaveReadiness = memberListOrdered.every(mO => {
-          const dD = currentPlanning.days[dateStr][mO.name];
-          return dD && (typeof dD === 'object') && dD.readiness === 'Readiness';
+          const dD = currentPlanning.days[dateStr] && currentPlanning.days[dateStr][mO.name];
+          if (!dD || typeof dD !== 'object') return false;
+          if (selectedDayPart === 'morning') return dD.morningReadiness === 'Readiness';
+          if (selectedDayPart === 'afternoon') return dD.afternoonReadiness === 'Readiness';
+          return dD.readiness === 'Readiness';
         });
         dayVal = allHaveReadiness ? null : 'Readiness';
       } else if (selectedStatus === 'place') {
-        dayVal = prompt(`Set Place for all members on ${dateStr}:`, '');
+        dayVal = prompt(`Set Place for all members on ${dateStr}:`, lastPlaceInput);
         if (dayVal === null) return;
+        setLastPlaceInput(dayVal);
       } else if (selectedStatus === 'freetext') {
         dayVal = prompt(`Enter Free Text for all members on ${dateStr}:`, '');
         if (dayVal === null) return;
@@ -1163,9 +1236,56 @@ function renderPlanning() {
         }
 
         if (selectedStatus === 'readiness') {
-          dayData.readiness = dayVal;
+          if (selectedDayPart === 'morning') {
+            if (dayVal === 'Readiness') {
+              dayData.morningReadiness = dayVal;
+            } else {
+              delete dayData.morningReadiness;
+            }
+            if (dayData.morningReadiness && dayData.afternoonReadiness) {
+              dayData.readiness = 'Readiness';
+            } else {
+              delete dayData.readiness;
+            }
+          } else if (selectedDayPart === 'afternoon') {
+            if (dayVal === 'Readiness') {
+              dayData.afternoonReadiness = dayVal;
+            } else {
+              delete dayData.afternoonReadiness;
+            }
+            if (dayData.morningReadiness && dayData.afternoonReadiness) {
+              dayData.readiness = 'Readiness';
+            } else {
+              delete dayData.readiness;
+            }
+          } else {
+            if (dayVal === 'Readiness') {
+              dayData.readiness = dayVal;
+              dayData.morningReadiness = dayVal;
+              dayData.afternoonReadiness = dayVal;
+            } else {
+              delete dayData.readiness;
+              delete dayData.morningReadiness;
+              delete dayData.afternoonReadiness;
+            }
+          }
         } else if (selectedStatus === 'place') {
-          dayData.place = dayVal;
+          if (selectedDayPart === 'morning') {
+            dayData.morningPlace = dayVal;
+            if (!dayVal) delete dayData.morningPlace;
+          } else if (selectedDayPart === 'afternoon') {
+            dayData.afternoonPlace = dayVal;
+            if (!dayVal) delete dayData.afternoonPlace;
+          } else {
+            dayData.place = dayVal;
+            dayData.morningPlace = dayVal;
+            dayData.afternoonPlace = dayVal;
+            if (!dayVal) {
+              delete dayData.place;
+              delete dayData.morningPlace;
+              delete dayData.afternoonPlace;
+            }
+          }
         } else if (selectedStatus === 'freetext') {
           // Check if all members already have 'freetext'
           const allSame = memberListOrdered.every(mO => {
@@ -1176,9 +1296,13 @@ function renderPlanning() {
           if (allSame) {
             dayData.status = 'none';
             delete dayData.freetext;
+            delete dayData.morningStatus;
+            delete dayData.afternoonStatus;
           } else {
             dayData.status = 'freetext';
             dayData.freetext = dayVal;
+            delete dayData.morningStatus;
+            delete dayData.afternoonStatus;
           }
         } else {
           if (selectedDayPart === 'morning') {
@@ -1295,10 +1419,73 @@ function renderPlanning() {
         // Left Sidebar for Readiness (20%)
         const rSidebar = document.createElement('div');
         rSidebar.className = 'cell-readiness-sidebar';
-        if (readiness) {
-          rSidebar.textContent = readiness;
+        rSidebar.style.background = 'transparent'; // override default background
+        rSidebar.style.writingMode = 'horizontal-tb';
+        rSidebar.style.height = '100%';
+        rSidebar.style.display = 'flex';
+        rSidebar.style.flexDirection = 'column';
+        rSidebar.style.alignItems = 'stretch';
+
+        const morningReadyText = (typeof dayData === 'object' && dayData.morningReadiness) || (readiness ? 'Readiness' : '');
+        const afternoonReadyText = (typeof dayData === 'object' && dayData.afternoonReadiness) || (readiness ? 'Readiness' : '');
+
+        const styleSubDiv = (div, hasText) => {
+          div.style.flex = '1';
+          div.style.display = 'flex';
+          div.style.alignItems = 'center';
+          div.style.justifyContent = 'center';
+          if (hasText) {
+            div.style.writingMode = 'vertical-rl';
+            div.style.textOrientation = 'mixed';
+            div.style.overflow = 'hidden';
+            div.style.whiteSpace = 'nowrap';
+          }
+        };
+
+        if (morningReadyText && afternoonReadyText) {
+          if (morningReadyText === afternoonReadyText) {
+            const fullDiv = document.createElement('div');
+            styleSubDiv(fullDiv, true);
+            fullDiv.style.background = '#ffebee';
+            fullDiv.textContent = morningReadyText;
+            rSidebar.appendChild(fullDiv);
+          } else {
+            const amDiv = document.createElement('div');
+            styleSubDiv(amDiv, true);
+            amDiv.style.background = '#ffebee';
+            amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+            amDiv.textContent = morningReadyText;
+            rSidebar.appendChild(amDiv);
+
+            const pmDiv = document.createElement('div');
+            styleSubDiv(pmDiv, true);
+            pmDiv.style.background = '#ffebee';
+            pmDiv.textContent = afternoonReadyText;
+            rSidebar.appendChild(pmDiv);
+          }
+        } else if (morningReadyText) {
+          const amDiv = document.createElement('div');
+          styleSubDiv(amDiv, true);
+          amDiv.style.background = '#ffebee';
+          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+          amDiv.textContent = morningReadyText;
+          rSidebar.appendChild(amDiv);
+
+          const pmDiv = document.createElement('div');
+          styleSubDiv(pmDiv, false);
+          rSidebar.appendChild(pmDiv);
+        } else if (afternoonReadyText) {
+          const amDiv = document.createElement('div');
+          styleSubDiv(amDiv, false);
+          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+          rSidebar.appendChild(amDiv);
+
+          const pmDiv = document.createElement('div');
+          styleSubDiv(pmDiv, true);
+          pmDiv.style.background = '#ffebee';
+          pmDiv.textContent = afternoonReadyText;
+          rSidebar.appendChild(pmDiv);
         } else {
-          rSidebar.style.background = 'transparent';
           rSidebar.style.border = 'none';
         }
         contentDiv.appendChild(rSidebar);
@@ -1336,10 +1523,73 @@ function renderPlanning() {
         // Right Sidebar for Place (20%)
         const pSidebar = document.createElement('div');
         pSidebar.className = 'cell-place-sidebar';
-        if (place) {
-          pSidebar.textContent = place;
+        pSidebar.style.background = 'transparent'; // override default background
+        pSidebar.style.writingMode = 'horizontal-tb';
+        pSidebar.style.height = '100%';
+        pSidebar.style.display = 'flex';
+        pSidebar.style.flexDirection = 'column';
+        pSidebar.style.alignItems = 'stretch';
+
+        const morningPlaceText = (typeof dayData === 'object' && dayData.morningPlace) || (place ? place : '');
+        const afternoonPlaceText = (typeof dayData === 'object' && dayData.afternoonPlace) || (place ? place : '');
+
+        const styleSubDivPlace = (div, hasText) => {
+          div.style.flex = '1';
+          div.style.display = 'flex';
+          div.style.alignItems = 'center';
+          div.style.justifyContent = 'center';
+          if (hasText) {
+            div.style.writingMode = 'vertical-rl';
+            div.style.textOrientation = 'mixed';
+            div.style.overflow = 'hidden';
+            div.style.whiteSpace = 'nowrap';
+          }
+        };
+
+        if (morningPlaceText && afternoonPlaceText) {
+          if (morningPlaceText === afternoonPlaceText) {
+            const fullDiv = document.createElement('div');
+            styleSubDivPlace(fullDiv, true);
+            fullDiv.style.background = '#e3f2fd';
+            fullDiv.textContent = morningPlaceText;
+            pSidebar.appendChild(fullDiv);
+          } else {
+            const amDiv = document.createElement('div');
+            styleSubDivPlace(amDiv, true);
+            amDiv.style.background = '#e3f2fd';
+            amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+            amDiv.textContent = morningPlaceText;
+            pSidebar.appendChild(amDiv);
+
+            const pmDiv = document.createElement('div');
+            styleSubDivPlace(pmDiv, true);
+            pmDiv.style.background = '#e3f2fd';
+            pmDiv.textContent = afternoonPlaceText;
+            pSidebar.appendChild(pmDiv);
+          }
+        } else if (morningPlaceText) {
+          const amDiv = document.createElement('div');
+          styleSubDivPlace(amDiv, true);
+          amDiv.style.background = '#e3f2fd';
+          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+          amDiv.textContent = morningPlaceText;
+          pSidebar.appendChild(amDiv);
+
+          const pmDiv = document.createElement('div');
+          styleSubDivPlace(pmDiv, false);
+          pSidebar.appendChild(pmDiv);
+        } else if (afternoonPlaceText) {
+          const amDiv = document.createElement('div');
+          styleSubDivPlace(amDiv, false);
+          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+          pSidebar.appendChild(amDiv);
+
+          const pmDiv = document.createElement('div');
+          styleSubDivPlace(pmDiv, true);
+          pmDiv.style.background = '#e3f2fd';
+          pmDiv.textContent = afternoonPlaceText;
+          pSidebar.appendChild(pmDiv);
         } else {
-          pSidebar.style.background = 'transparent';
           pSidebar.style.border = 'none';
         }
         contentDiv.appendChild(pSidebar);
@@ -1353,24 +1603,77 @@ function renderPlanning() {
         }
 
         if (selectedStatus === 'readiness') {
-          if (dayData.readiness === 'Readiness') {
-            delete dayData.readiness;
+          if (selectedDayPart === 'morning') {
+            if (dayData.morningReadiness === 'Readiness') {
+              delete dayData.morningReadiness;
+            } else {
+              dayData.morningReadiness = 'Readiness';
+            }
+            if (dayData.morningReadiness && dayData.afternoonReadiness) {
+              dayData.readiness = 'Readiness';
+            } else {
+              delete dayData.readiness;
+            }
+          } else if (selectedDayPart === 'afternoon') {
+            if (dayData.afternoonReadiness === 'Readiness') {
+              delete dayData.afternoonReadiness;
+            } else {
+              dayData.afternoonReadiness = 'Readiness';
+            }
+            if (dayData.morningReadiness && dayData.afternoonReadiness) {
+              dayData.readiness = 'Readiness';
+            } else {
+              delete dayData.readiness;
+            }
           } else {
-            dayData.readiness = 'Readiness';
+            if (dayData.readiness === 'Readiness' || (dayData.morningReadiness && dayData.afternoonReadiness)) {
+              delete dayData.readiness;
+              delete dayData.morningReadiness;
+              delete dayData.afternoonReadiness;
+            } else {
+              dayData.readiness = 'Readiness';
+              dayData.morningReadiness = 'Readiness';
+              dayData.afternoonReadiness = 'Readiness';
+            }
           }
         } else if (selectedStatus === 'place') {
-          const val = prompt(`Set Place for ${member} on ${dateStr}:`, dayData.place || '');
-          if (val !== null) dayData.place = val;
+          const currentVal = (selectedDayPart === 'morning') ? (dayData.morningPlace || '') :
+                             (selectedDayPart === 'afternoon') ? (dayData.afternoonPlace || '') :
+                             (dayData.place || '');
+          const val = prompt(`Set Place for ${member} on ${dateStr}:`, currentVal || lastPlaceInput);
+          if (val !== null) {
+            if (selectedDayPart === 'morning') {
+              dayData.morningPlace = val;
+              if (!val) delete dayData.morningPlace;
+            } else if (selectedDayPart === 'afternoon') {
+              dayData.afternoonPlace = val;
+              if (!val) delete dayData.afternoonPlace;
+            } else {
+              dayData.place = val;
+              dayData.morningPlace = val;
+              dayData.afternoonPlace = val;
+              if (!val) {
+                delete dayData.place;
+                delete dayData.morningPlace;
+                delete dayData.afternoonPlace;
+              }
+            }
+            if (val) setLastPlaceInput(val);
+          }
         } else if (selectedStatus === 'freetext') {
           const currentStatus = dayData.status || 'none';
           if (currentStatus === 'freetext') {
             dayData.status = 'none';
             delete dayData.freetext;
+            delete dayData.morningStatus;
+            delete dayData.afternoonStatus;
           } else {
             const val = prompt(`Enter Free Text for ${member} on ${dateStr}:`, dayData.freetext || '');
             if (val !== null) {
               dayData.status = 'freetext';
               dayData.freetext = val;
+              delete dayData.morningStatus;
+              delete dayData.afternoonStatus;
             }
           }
         } else {

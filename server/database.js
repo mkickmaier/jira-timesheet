@@ -287,7 +287,10 @@ function getCapacityFromPlanning(pi, iterationDates) {
           let morningStatus = 'none';
           let afternoonStatus = 'none';
           if (typeof dayData === 'object' && dayData !== null) {
-            if (dayData.morningStatus || dayData.afternoonStatus) {
+            if (dayData.status === 'freetext') {
+              morningStatus = 'freetext';
+              afternoonStatus = 'freetext';
+            } else if (dayData.morningStatus || dayData.afternoonStatus) {
               morningStatus = dayData.morningStatus || 'none';
               afternoonStatus = dayData.afternoonStatus || 'none';
             } else {
@@ -367,7 +370,10 @@ function getCapacityFromPlanning(pi, iterationDates) {
         let morningStatus = 'none';
         let afternoonStatus = 'none';
         if (typeof dayData === 'object' && dayData !== null) {
-          if (dayData.morningStatus || dayData.afternoonStatus) {
+          if (dayData.status === 'freetext') {
+            morningStatus = 'freetext';
+            afternoonStatus = 'freetext';
+          } else if (dayData.morningStatus || dayData.afternoonStatus) {
             morningStatus = dayData.morningStatus || 'none';
             afternoonStatus = dayData.afternoonStatus || 'none';
           } else {
