@@ -100,7 +100,8 @@ function getJiraConfig() {
     accountId: process.env.JIRA_ACCOUNT_ID || '',
     isCloud,
     apiVersion: process.env.JIRA_API_VERSION || (isCloud ? '3' : '2'),
-    authType
+    authType,
+    boardId: process.env.JIRA_BOARD_ID || ''
   };
 }
 
@@ -129,12 +130,26 @@ function buildHttpsAgent() {
   return caBundle ? new https.Agent({ ca: caBundle, rejectUnauthorized: true }) : undefined;
 }
 
-const httpsAgent = buildHttpsAgent();
+let _httpsAgent;
+let _httpsAgentBuilt = false;
+
+function getHttpsAgent() {
+  if (!_httpsAgentBuilt) {
+    _httpsAgent = buildHttpsAgent();
+    _httpsAgentBuilt = true;
+    if (_httpsAgent) {
+      console.log('[TLS] Custom CA httpsAgent initialized');
+    } else {
+      console.warn('[TLS] No custom CA certs found — using default TLS trust store');
+    }
+  }
+  return _httpsAgent;
+}
 
 module.exports = {
   setupConfig,
   getJiraConfig,
-  httpsAgent,
+  getHttpsAgent,
   PORT
 };
 

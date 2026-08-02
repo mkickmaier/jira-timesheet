@@ -24,7 +24,8 @@ function jiraHeaders() {
 
 function fetchWithAgent(url, options = {}) {
   const opts = { ...options };
-  if (configModule.httpsAgent && !opts.agent) opts.agent = configModule.httpsAgent;
+  const agent = configModule.getHttpsAgent();
+  if (agent && !opts.agent) opts.agent = agent;
   return fetch(url, opts);
 }
 
@@ -49,6 +50,41 @@ async function getCapacityData(pi) {
   const allIssues = [];
   const iterationsFound = new Set();
   const iterationDates = {}; // { sprintName: { startDate, endDate } }
+
+  // Pre-fetch all sprint dates from the board API if JIRA_BOARD_ID is configured
+  if (config.boardId) {
+    console.log(`[CAPACITY] Fetching sprint dates from board ${config.boardId}`);
+    try {
+      let startAt = 0;
+      const pageSize = 50;
+      let isLast = false;
+      while (!isLast) {
+        const boardUrl = `${config.baseUrl}/rest/agile/1.0/board/${config.boardId}/sprint?startAt=${startAt}&maxResults=${pageSize}`;
+        const br = await fetchWithAgent(boardUrl, { headers: jiraHeaders() });
+        if (!br.ok) {
+          console.warn(`[CAPACITY] Board sprint fetch failed with status ${br.status} — falling back to issue-based date extraction`);
+          break;
+        }
+        const boardData = await parseResponse(br);
+        const sprints = boardData.values || [];
+        for (const sprint of sprints) {
+          if (sprint.name && sprint.name.startsWith(pi + '_')) {
+            if (sprint.startDate || sprint.endDate) {
+              iterationDates[sprint.name] = { startDate: sprint.startDate || null, endDate: sprint.endDate || null };
+              console.log(`[CAPACITY] Board API: dates for ${sprint.name}:`, iterationDates[sprint.name]);
+            }
+          }
+        }
+        isLast = boardData.isLast !== false ? true : (startAt + pageSize >= boardData.total);
+        startAt += pageSize;
+        if (sprints.length < pageSize) break;
+      }
+    } catch (e) {
+      console.warn(`[CAPACITY] Board sprint fetch failed unexpectedly:`, e.message);
+    }
+  } else {
+    console.log(`[CAPACITY] No JIRA_BOARD_ID set — sprint dates will be extracted from issue fields only`);
+  }
 
   console.log(`[CAPACITY] Initiating parallel fetch for ${pi} (sprints 01 to ${maxIterations})`);
 
@@ -89,11 +125,12 @@ async function getCapacityData(pi) {
           for (const item of arr) {
             if (typeof item === 'object' && item !== null) {
               if (item.name === sprintName) {
-                if (item.startDate && item.endDate) {
+                // Accept partial dates — capture whatever Jira has set
+                if (item.startDate || item.endDate) {
                   sprintInfo = item;
                   break;
                 }
-              } else if (!item.name && item.startDate && item.endDate) {
+              } else if (!item.name && (item.startDate || item.endDate)) {
                 sprintInfo = item;
               }
             } else if (typeof item === 'string') {
@@ -142,15 +179,17 @@ async function getCapacityData(pi) {
 
   // Group responses in numerical order to maintain consistency
   responses.forEach(res => {
-    if (res.success && res.issues && res.issues.length > 0) {
-      const sprintName = res.sprintName;
-      if (res.dates) {
-        iterationDates[sprintName] = res.dates;
-        console.log(`[CAPACITY] Extracted dates for ${sprintName}:`, res.dates);
-      }
+    if (!res.success || !res.issues) return;
+    const sprintName = res.sprintName;
+    // A 200 OK with 0 issues means the sprint exists but is empty — still mark it found
+    iterationsFound.add(sprintName);
+    if (res.dates) {
+      iterationDates[sprintName] = res.dates;
+      console.log(`[CAPACITY] Extracted dates for ${sprintName}:`, res.dates);
+    }
+    if (res.issues.length > 0) {
       res.issues.forEach(i => i._sprintName = sprintName);
       allIssues.push(...res.issues);
-      iterationsFound.add(sprintName);
     }
   });
 
@@ -187,9 +226,21 @@ async function getCapacityData(pi) {
     }
   });
 
+  // Also include sprints that had issues but none were assigned
+  iterationsFound.forEach(s => iterations.add(s));
   const sortedIterations = Array.from(iterations).sort();
-  const membersArray = Object.values(members).sort((a, b) => a.name.localeCompare(b.name));
   const baselineData = database.getCapacityFromPlanning(pi, iterationDates);
+
+  // Supplement members from planning baseline so people with no Jira tickets yet are still shown
+  if (baselineData && baselineData.capacity) {
+    for (const memberName of Object.keys(baselineData.capacity)) {
+      if (memberName === 'Milestones') continue;
+      if (!members[memberName]) {
+        members[memberName] = { name: memberName, capacity: {} };
+      }
+    }
+  }
+  const membersArray = Object.values(members).sort((a, b) => a.name.localeCompare(b.name));
 
   return {
     pi,
