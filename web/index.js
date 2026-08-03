@@ -968,6 +968,8 @@ function renderPlanning() {
       };
 
       const applyToMemberInWeek = (member, days, initialValue = null, overrideExisting = true) => {
+        const mSettings = (currentPlanning.memberSettings && currentPlanning.memberSettings[member]) || { workingDays: [1, 2, 3, 4, 5] };
+        days = days.filter(ds => mSettings.workingDays.includes(new Date(ds + 'T00:00:00').getDay()));
         let val = initialValue;
         if (selectedStatus === 'readiness') {
           // Check if all members for all these days already have 'Readiness'
@@ -994,10 +996,19 @@ function renderPlanning() {
         } else if (selectedStatus === 'place' && val === null) {
           val = prompt(`Set Place for ${member} for this week:`, lastPlaceInput);
           if (val === null) return; // Cancel
-          setLastPlaceInput(val);
         } else if (selectedStatus === 'freetext' && val === null) {
           val = prompt(`Enter Free Text for ${member} for this week:`, '');
           if (val === null) return; // Cancel
+        }
+
+        let isDelete = false;
+        let cleanVal = '';
+        if (selectedStatus === 'place') {
+          isDelete = !val || val.trim() === '' || val.trim().toLowerCase() === 'none' || val.trim().toLowerCase() === 'clear';
+          if (!isDelete) {
+            cleanVal = val.trim();
+            setLastPlaceInput(cleanVal);
+          }
         }
 
         days.forEach(ds => {
@@ -1045,20 +1056,43 @@ function renderPlanning() {
               }
             }
           } else if (selectedStatus === 'place') {
-            if (selectedDayPart === 'morning') {
-              dayData.morningPlace = val;
-              if (!val) delete dayData.morningPlace;
-            } else if (selectedDayPart === 'afternoon') {
-              dayData.afternoonPlace = val;
-              if (!val) delete dayData.afternoonPlace;
-            } else {
-              dayData.place = val;
-              dayData.morningPlace = val;
-              dayData.afternoonPlace = val;
-              if (!val) {
+            if (isDelete) {
+              if (selectedDayPart === 'morning') {
+                delete dayData.morningPlace;
+                if (dayData.place) {
+                  dayData.afternoonPlace = dayData.place;
+                  delete dayData.place;
+                }
+              } else if (selectedDayPart === 'afternoon') {
+                delete dayData.afternoonPlace;
+                if (dayData.place) {
+                  dayData.morningPlace = dayData.place;
+                  delete dayData.place;
+                }
+              } else {
                 delete dayData.place;
                 delete dayData.morningPlace;
                 delete dayData.afternoonPlace;
+              }
+            } else {
+              if (selectedDayPart === 'morning') {
+                dayData.morningPlace = cleanVal;
+                if (dayData.afternoonPlace === cleanVal) {
+                  dayData.place = cleanVal;
+                } else {
+                  delete dayData.place;
+                }
+              } else if (selectedDayPart === 'afternoon') {
+                dayData.afternoonPlace = cleanVal;
+                if (dayData.morningPlace === cleanVal) {
+                  dayData.place = cleanVal;
+                } else {
+                  delete dayData.place;
+                }
+              } else {
+                dayData.place = cleanVal;
+                dayData.morningPlace = cleanVal;
+                dayData.afternoonPlace = cleanVal;
               }
             }
           } else if (selectedStatus === 'freetext') {
@@ -1093,16 +1127,21 @@ function renderPlanning() {
         if (selectedStatus === 'place') {
           bulkVal = prompt(`Set Place for all members for this week:`, lastPlaceInput);
           if (bulkVal === null) return;
-          setLastPlaceInput(bulkVal);
+          const isDelete = !bulkVal || bulkVal.trim() === '' || bulkVal.trim().toLowerCase() === 'none' || bulkVal.trim().toLowerCase() === 'clear';
+          if (!isDelete) {
+            setLastPlaceInput(bulkVal.trim());
+          }
         } else if (selectedStatus === 'freetext') {
           bulkVal = prompt(`Enter Free Text for all members for this week:`, '');
           if (bulkVal === null) return;
         }
 
-        // Check if any target cell already has an entry
+        // Check if any target cell (on working days) already has an entry
         let hasAnyExisting = false;
         for (const mObj of memberListOrdered) {
-          for (const ds of daysInWeek) {
+          const mSettings = (currentPlanning.memberSettings && currentPlanning.memberSettings[mObj.name]) || { workingDays: [1, 2, 3, 4, 5] };
+          const memberDaysInWeek = daysInWeek.filter(ds => mSettings.workingDays.includes(new Date(ds + 'T00:00:00').getDay()));
+          for (const ds of memberDaysInWeek) {
             if (isCellNotEmpty(ds, mObj.name)) {
               hasAnyExisting = true;
               break;
@@ -1131,7 +1170,9 @@ function renderPlanning() {
         weekMemberTd.style.backgroundColor = '#eff6ff';
         weekMemberTd.title = `Click to apply selected status/info to ${member} for this whole week`;
         weekMemberTd.onclick = () => {
-          const daysInWeek = getDaysInWeek();
+          const allDaysInWeek = getDaysInWeek();
+          const mSettings = (currentPlanning.memberSettings && currentPlanning.memberSettings[member]) || { workingDays: [1, 2, 3, 4, 5] };
+          const daysInWeek = allDaysInWeek.filter(ds => mSettings.workingDays.includes(new Date(ds + 'T00:00:00').getDay()));
 
           // Check if any target cell for this member already has an entry
           let hasAnyExisting = false;
@@ -1205,7 +1246,10 @@ function renderPlanning() {
       } else if (selectedStatus === 'place') {
         dayVal = prompt(`Set Place for all members on ${dateStr}:`, lastPlaceInput);
         if (dayVal === null) return;
-        setLastPlaceInput(dayVal);
+        const isDelete = !dayVal || dayVal.trim() === '' || dayVal.trim().toLowerCase() === 'none' || dayVal.trim().toLowerCase() === 'clear';
+        if (!isDelete) {
+          setLastPlaceInput(dayVal.trim());
+        }
       } else if (selectedStatus === 'freetext') {
         dayVal = prompt(`Enter Free Text for all members on ${dateStr}:`, '');
         if (dayVal === null) return;
@@ -1270,23 +1314,48 @@ function renderPlanning() {
             }
           }
         } else if (selectedStatus === 'place') {
-          if (selectedDayPart === 'morning') {
-            dayData.morningPlace = dayVal;
-            if (!dayVal) delete dayData.morningPlace;
-          } else if (selectedDayPart === 'afternoon') {
-            dayData.afternoonPlace = dayVal;
-            if (!dayVal) delete dayData.afternoonPlace;
-          } else {
-            dayData.place = dayVal;
-            dayData.morningPlace = dayVal;
-            dayData.afternoonPlace = dayVal;
-            if (!dayVal) {
+          const isDelete = !dayVal || dayVal.trim() === '' || dayVal.trim().toLowerCase() === 'none' || dayVal.trim().toLowerCase() === 'clear';
+          if (isDelete) {
+            if (selectedDayPart === 'morning') {
+              delete dayData.morningPlace;
+              if (dayData.place) {
+                dayData.afternoonPlace = dayData.place;
+                delete dayData.place;
+              }
+            } else if (selectedDayPart === 'afternoon') {
+              delete dayData.afternoonPlace;
+              if (dayData.place) {
+                dayData.morningPlace = dayData.place;
+                delete dayData.place;
+              }
+            } else {
               delete dayData.place;
               delete dayData.morningPlace;
               delete dayData.afternoonPlace;
             }
+          } else {
+            const cleanVal = dayVal.trim();
+            if (selectedDayPart === 'morning') {
+              dayData.morningPlace = cleanVal;
+              if (dayData.afternoonPlace === cleanVal) {
+                dayData.place = cleanVal;
+              } else {
+                delete dayData.place;
+              }
+            } else if (selectedDayPart === 'afternoon') {
+              dayData.afternoonPlace = cleanVal;
+              if (dayData.morningPlace === cleanVal) {
+                dayData.place = cleanVal;
+              } else {
+                delete dayData.place;
+              }
+            } else {
+              dayData.place = cleanVal;
+              dayData.morningPlace = cleanVal;
+              dayData.afternoonPlace = cleanVal;
+            }
           }
-        } else if (selectedStatus === 'freetext') {
+        }else if (selectedStatus === 'freetext') {
           // Check if all members already have 'freetext'
           const allSame = memberListOrdered.every(mO => {
             const dD = currentPlanning.days[dateStr][mO.name] || 'none';
@@ -1351,6 +1420,8 @@ function renderPlanning() {
 
     memberListOrdered.forEach(mObj => {
       const member = mObj.name;
+      const mSettings = (currentPlanning.memberSettings && currentPlanning.memberSettings[member]) || { workingDays: [1, 2, 3, 4, 5] };
+      const isWorkingDay = mSettings.workingDays.includes(d.getDay());
       const td = document.createElement('td');
       td.className = 'planning-cell';
       const dayData = (currentPlanning.days[dateStr] && currentPlanning.days[dateStr][member]) || 'none';
@@ -1642,23 +1713,48 @@ function renderPlanning() {
                              (dayData.place || '');
           const val = prompt(`Set Place for ${member} on ${dateStr}:`, currentVal || lastPlaceInput);
           if (val !== null) {
-            if (selectedDayPart === 'morning') {
-              dayData.morningPlace = val;
-              if (!val) delete dayData.morningPlace;
-            } else if (selectedDayPart === 'afternoon') {
-              dayData.afternoonPlace = val;
-              if (!val) delete dayData.afternoonPlace;
-            } else {
-              dayData.place = val;
-              dayData.morningPlace = val;
-              dayData.afternoonPlace = val;
-              if (!val) {
+            const isDelete = !val || val.trim() === '' || val.trim().toLowerCase() === 'none' || val.trim().toLowerCase() === 'clear';
+            if (isDelete) {
+              if (selectedDayPart === 'morning') {
+                delete dayData.morningPlace;
+                if (dayData.place) {
+                  dayData.afternoonPlace = dayData.place;
+                  delete dayData.place;
+                }
+              } else if (selectedDayPart === 'afternoon') {
+                delete dayData.afternoonPlace;
+                if (dayData.place) {
+                  dayData.morningPlace = dayData.place;
+                  delete dayData.place;
+                }
+              } else {
                 delete dayData.place;
                 delete dayData.morningPlace;
                 delete dayData.afternoonPlace;
               }
+            } else {
+              const cleanVal = val.trim();
+              if (selectedDayPart === 'morning') {
+                dayData.morningPlace = cleanVal;
+                if (dayData.afternoonPlace === cleanVal) {
+                  dayData.place = cleanVal;
+                } else {
+                  delete dayData.place;
+                }
+              } else if (selectedDayPart === 'afternoon') {
+                dayData.afternoonPlace = cleanVal;
+                if (dayData.morningPlace === cleanVal) {
+                  dayData.place = cleanVal;
+                } else {
+                  delete dayData.place;
+                }
+              } else {
+                dayData.place = cleanVal;
+                dayData.morningPlace = cleanVal;
+                dayData.afternoonPlace = cleanVal;
+              }
+              setLastPlaceInput(cleanVal);
             }
-            if (val) setLastPlaceInput(val);
           }
         } else if (selectedStatus === 'freetext') {
           const currentStatus = dayData.status || 'none';
@@ -1710,6 +1806,9 @@ function renderPlanning() {
         triggerAutosave();
       };
 
+      if (!isWorkingDay) {
+        td.classList.add('non-working-day');
+      }
       tr.appendChild(td);
     });
 
