@@ -294,7 +294,7 @@ closeModal.onclick = () => {
 };
 
 window.onclick = (event) => {
-  if (event.target == detailsModal) {
+  if (event.target === detailsModal) {
     detailsModal.style.display = 'none';
   }
 };

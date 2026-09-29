@@ -18,11 +18,6 @@ const planningCard = document.getElementById('planningCard');
 const tableHeader = document.getElementById('tableHeader');
 const tableBody = document.getElementById('tableBody');
 const statusLegend = document.getElementById('statusLegend');
-const editInfoReadiness = document.getElementById('editInfoReadiness');
-const editInfoPlace = document.getElementById('editInfoPlace');
-const editInfoMemberSpan = document.getElementById('editInfoMember');
-const saveEditBoxBtn = document.getElementById('saveEditBox');
-const closeEditBoxBtn = document.getElementById('closeEditBox');
 const contextMenu = document.getElementById('contextMenu');
 const eventTypeFilter = document.getElementById('eventTypeFilter');
 
@@ -30,8 +25,7 @@ function getWeekNumber(d) {
   d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-  const weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
-  return weekNo;
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }
 
 function formatDateLocal(date) {
@@ -1047,12 +1041,12 @@ function applyTypeToDayData(dayData, typeId, dayPart, customVal = null) {
     } else {
       const targetVal = customVal !== null ? customVal : typeId;
       if (dayPart === 'morning') {
-        let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
+        let {afternoonStatus: aS } = getDayStatuses(dayData);
         dayData.morningStatus = targetVal;
         dayData.afternoonStatus = aS;
         dayData.status = (targetVal === aS) ? targetVal : 'none';
       } else if (dayPart === 'afternoon') {
-        let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
+        let { morningStatus: mS} = getDayStatuses(dayData);
         dayData.morningStatus = mS;
         dayData.afternoonStatus = targetVal;
         dayData.status = (mS === targetVal) ? mS : 'none';
@@ -1082,9 +1076,7 @@ async function loadPlanning() {
   statusMsg.innerHTML = '<span class="loading">Loading...</span>';
   try {
     const res = await fetch(`/api/planning?pi=${encodeURIComponent(pi)}`);
-    const data = await res.json();
-
-    currentPlanning = data;
+    currentPlanning = await res.json();
 
     // Migrate old data structure
     if (!currentPlanning.teams) currentPlanning.teams = {};
@@ -1450,7 +1442,6 @@ function renderPlanning() {
         let val = initialValue;
 
         const selectedTypeObj = getTypeObj(selectedStatus);
-        const display = selectedTypeObj.display || 'middle';
 
         if (selectedStatus === 'place' && val === null) {
           val = prompt(`Set Place for ${member} for this week:`, lastPlaceInput);
@@ -1620,7 +1611,6 @@ function renderPlanning() {
       if (!currentPlanning.days[dateStr]) currentPlanning.days[dateStr] = {};
 
       const selectedTypeObj = getTypeObj(selectedStatus);
-      const display = selectedTypeObj.display || 'middle';
 
       let dayVal = null;
       if (selectedStatus === 'place') {
@@ -1921,8 +1911,7 @@ function calculateCapacity() {
     const itNum = Math.floor(dayCount / 14) + 1;
     const itName = `${pi}_${itNum.toString().padStart(2, '0')}`;
     const dateStr = d.toISOString().split('T')[0];
-    const isWeekend = (d.getDay() === 0 || d.getDay() === 6);
-
+    (d.getDay() === 0 || d.getDay() === 6);
     currentPlanning.members.forEach(member => {
       if (!capacity[member][itName]) capacity[member][itName] = 0;
 
