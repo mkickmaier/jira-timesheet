@@ -191,11 +191,13 @@ function renderTable(data) {
       td.appendChild(capaSpan);
 
       // Over-planning detection
-      if (plannedSeconds > capacitySeconds && capacitySeconds > 0) {
-        const overPercent = (plannedSeconds - capacitySeconds) / capacitySeconds;
-        if (overPercent > 0.05) {
+      if (plannedSeconds > capacitySeconds) {
+        const overPercent = capacitySeconds > 0 ? (plannedSeconds - capacitySeconds) / capacitySeconds : 1;
+        if (capacitySeconds === 0 || overPercent > 0.05) {
           td.classList.add('over-planned');
-          td.title = `Over-planned by more than 5%! Capacity: ${formatTime(capacitySeconds)}`;
+          td.title = capacitySeconds === 0
+            ? `Over-planned! Capacity: ${formatTime(capacitySeconds)}`
+            : `Over-planned by more than 5%! Capacity: ${formatTime(capacitySeconds)}`;
         } else {
           td.classList.add('warning-planned');
           td.title = `Over-planned by up to 5%! Capacity: ${formatTime(capacitySeconds)}`;
@@ -218,9 +220,9 @@ function renderTable(data) {
     totalCapaDiv.textContent = `of ${formatTime(memberTotalCapacity)}`;
     totalTd.appendChild(totalCapaDiv);
 
-    if (memberTotalPlanned > memberTotalCapacity && memberTotalCapacity > 0) {
-      const totalOverPercent = (memberTotalPlanned - memberTotalCapacity) / memberTotalCapacity;
-      if (totalOverPercent > 0.05) {
+    if (memberTotalPlanned > memberTotalCapacity) {
+      const totalOverPercent = memberTotalCapacity > 0 ? (memberTotalPlanned - memberTotalCapacity) / memberTotalCapacity : 1;
+      if (memberTotalCapacity === 0 || totalOverPercent > 0.05) {
         totalTd.classList.add('over-planned');
       } else {
         totalTd.classList.add('warning-planned');

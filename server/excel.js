@@ -193,6 +193,12 @@ function exportExcel(pi, startDate, endDate, filterEvent, res) {
           if (status === filter || morningStatus === filter || afternoonStatus === filter) {
             return true;
           }
+          if (typeof dayData === 'object') {
+            if (filter === 'readiness' && (dayData.readiness || dayData.morningReadiness || dayData.afternoonReadiness || dayData.left === 'readiness' || dayData.morningLeft === 'readiness' || dayData.afternoonLeft === 'readiness')) return true;
+            if (filter === 'place' && (dayData.place || dayData.morningPlace || dayData.afternoonPlace || dayData.right === 'place' || dayData.morningRight === 'place' || dayData.afternoonRight === 'place')) return true;
+            if (dayData.left === filter || dayData.morningLeft === filter || dayData.afternoonLeft === filter) return true;
+            if (dayData.right === filter || dayData.morningRight === filter || dayData.afternoonRight === filter) return true;
+          }
         }
       }
       return false;
@@ -235,7 +241,15 @@ function exportExcel(pi, startDate, endDate, filterEvent, res) {
           if (dayData) {
             const { morningStatus, afternoonStatus } = getDayStatuses(dayData);
             const status = (typeof dayData === 'object') ? dayData.status : dayData;
-            return (status === filter || morningStatus === filter || afternoonStatus === filter);
+            if (status === filter || morningStatus === filter || afternoonStatus === filter) {
+              return true;
+            }
+            if (typeof dayData === 'object') {
+              if (filter === 'readiness' && (dayData.readiness || dayData.morningReadiness || dayData.afternoonReadiness || dayData.left === 'readiness' || dayData.morningLeft === 'readiness' || dayData.afternoonLeft === 'readiness')) return true;
+              if (filter === 'place' && (dayData.place || dayData.morningPlace || dayData.afternoonPlace || dayData.right === 'place' || dayData.morningRight === 'place' || dayData.afternoonRight === 'place')) return true;
+              if (dayData.left === filter || dayData.morningLeft === filter || dayData.afternoonLeft === filter) return true;
+              if (dayData.right === filter || dayData.morningRight === filter || dayData.afternoonRight === filter) return true;
+            }
           }
           return false;
         });
@@ -294,9 +308,9 @@ function exportExcel(pi, startDate, endDate, filterEvent, res) {
     }
 
     // Build Legend sheet
-    const legendRows = [['ID/Code', 'Label', 'Type', 'Reduction (%)', 'Color']];
+    const legendRows = [['ID/Code', 'Label', 'Type', 'Reduction (%)', 'Color', 'Display']];
     types.forEach(t => {
-      legendRows.push([t.id, t.label, t.type, t.reduction !== undefined ? t.reduction : 100, t.color]);
+      legendRows.push([t.id, t.label, t.type, t.reduction !== undefined ? t.reduction : 100, t.color, t.display || 'middle']);
     });
 
     // Build PI Planning sheet using only filtered members

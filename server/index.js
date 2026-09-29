@@ -161,18 +161,43 @@ app.use((req, res) => {
 });
 
 function openBrowser(url) {
+  if (process.env.NODE_ENV === 'production' || process.env.DOCKER_CONTAINER || process.env.NO_BROWSER) {
+    return;
+  }
   const start = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-  exec(`${start} ${url}`);
+  try {
+    exec(`${start} ${url}`);
+  } catch (e) {
+    // Ignore browser open errors in non-desktop environments
+  }
 }
 
 async function start() {
   await configModule.setupConfig();
 
-  app.listen(configModule.PORT, () => {
+  const server = app.listen(configModule.PORT, () => {
     const url = `http://localhost:${configModule.PORT}`;
     console.log(`Server running on ${url}`);
     openBrowser(url);
   });
+
+  const shutdown = (signal) => {
+    console.log(`Received ${signal}, shutting down gracefully...`);
+    server.close(() => {
+      console.log('HTTP server closed');
+      process.exit(0);
+    });
+    if (typeof server.closeIdleConnections === 'function') {
+      server.closeIdleConnections();
+    }
+    setTimeout(() => {
+      console.warn('Forcing server shutdown');
+      process.exit(0);
+    }, 2000).unref();
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 start().catch(err => {

@@ -207,23 +207,41 @@ function getPlanningTypes() {
     const baseDir = path.join(__dirname, '..');
     const filePath = path.join(baseDir, 'data', 'planning_types.json');
     if (fs.existsSync(filePath)) {
-      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      const types = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (Array.isArray(types)) {
+        types.forEach(t => {
+          if (!t.display) {
+            if (t.id === 'readiness') t.display = 'left';
+            else if (t.id === 'place') t.display = 'right';
+            else t.display = 'middle';
+          }
+        });
+        if (!types.some(t => t.id === 'readiness')) {
+          types.push({ id: 'readiness', label: 'Readiness', color: '#d32f2f', type: 'information', reduction: 0, display: 'left' });
+        }
+        if (!types.some(t => t.id === 'place')) {
+          types.push({ id: 'place', label: 'Place', color: '#1976d2', type: 'information', reduction: 0, display: 'right' });
+        }
+        return types;
+      }
     }
   } catch (e) {
     console.error('[PLANNING] Read types error:', e);
   }
   // Default types
   return [
-    { id: 'none', label: '', color: '#fff', type: 'absence', reduction: 0 },
-    { id: 'ooo', label: 'OoO', color: '#7030a0', type: 'absence', reduction: 100 },
-    { id: 'urlaub', label: 'Urlaub', color: '#a6a6a6', type: 'absence', reduction: 100 },
-    { id: 'feiertag', label: 'Feiertag', color: '#7030a0', type: 'absence', reduction: 100 },
-    { id: 'ho', label: 'HO', color: '#92d050', type: 'information', reduction: 0 },
-    { id: 'planning', label: 'Planning', color: '#ffff00', type: 'information', reduction: 0 },
-    { id: 'sbb', label: 'SBB', color: '#ffccff', type: 'information', reduction: 0 },
-    { id: 'rollout', label: 'Rollout', color: '#00b0f0', type: 'information', reduction: 0 },
-    { id: 'release', label: 'Release', color: '#00ffff', type: 'information', reduction: 0 },
-    { id: 'freetext', label: 'Free Text', color: '#ff9900', type: 'information', reduction: 0 }
+    { id: 'none', label: '', color: '#fff', type: 'absence', reduction: 0, display: 'middle' },
+    { id: 'ooo', label: 'OoO', color: '#7030a0', type: 'absence', reduction: 100, display: 'middle' },
+    { id: 'urlaub', label: 'Urlaub', color: '#a6a6a6', type: 'absence', reduction: 100, display: 'middle' },
+    { id: 'feiertag', label: 'Feiertag', color: '#7030a0', type: 'absence', reduction: 100, display: 'middle' },
+    { id: 'ho', label: 'HO', color: '#92d050', type: 'information', reduction: 0, display: 'middle' },
+    { id: 'planning', label: 'Planning', color: '#ffff00', type: 'absence', reduction: 100, display: 'middle' },
+    { id: 'sbb', label: 'SBB', color: '#ffccff', type: 'information', reduction: 0, display: 'middle' },
+    { id: 'rollout', label: 'Rollout', color: '#00b0f0', type: 'information', reduction: 0, display: 'middle' },
+    { id: 'release', label: 'Release', color: '#00ffff', type: 'information', reduction: 0, display: 'middle' },
+    { id: 'freetext', label: 'Free Text Absence', color: '#ff9900', type: 'absence', reduction: 100, display: 'middle' },
+    { id: 'readiness', label: 'Readiness', color: '#d32f2f', type: 'information', reduction: 0, display: 'left' },
+    { id: 'place', label: 'Place', color: '#1976d2', type: 'information', reduction: 0, display: 'right' }
   ];
 }
 

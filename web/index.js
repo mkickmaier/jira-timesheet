@@ -6,9 +6,6 @@ function toggleCard() {
 }
 const piNameInput = document.getElementById('piName');
 const loadBtn = document.getElementById('loadBtn');
-const exportExcelBtn = document.getElementById('exportExcelBtn');
-const importExcelBtn = document.getElementById('importExcelBtn');
-const excelFileInput = document.getElementById('excelFileInput');
 const addMemberBtn = document.getElementById('addMemberBtn');
 const memberInput = document.getElementById('memberInput');
 const teamSelect = document.getElementById('teamSelect');
@@ -65,6 +62,22 @@ function getDayStatuses(dayData) {
   return { morningStatus, afternoonStatus };
 }
 
+function getLightBgColor(hexColor) {
+  if (!hexColor || typeof hexColor !== 'string' || !hexColor.startsWith('#')) return '#f0f4ff';
+  let hex = hexColor.replace('#', '');
+  if (hex.length === 3) {
+    hex = hex.split('').map(c => c + c).join('');
+  }
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return '#f0f4ff';
+  const lr = Math.round(r * 0.15 + 255 * 0.85);
+  const lg = Math.round(g * 0.15 + 255 * 0.85);
+  const lb = Math.round(b * 0.15 + 255 * 0.85);
+  return `rgb(${lr}, ${lg}, ${lb})`;
+}
+
 function isCellNotEmpty(dateStr, member) {
   if (!currentPlanning.days || !currentPlanning.days[dateStr]) return false;
   const dayData = currentPlanning.days[dateStr][member];
@@ -79,10 +92,12 @@ function isCellNotEmpty(dateStr, member) {
     const mS = dayData.morningStatus || 'none';
     const aS = dayData.afternoonStatus || 'none';
     const hasStatus = (status !== 'none' || mS !== 'none' || aS !== 'none');
-    const hasReadiness = !!dayData.readiness;
-    const hasPlace = !!dayData.place;
+    const hasReadiness = !!dayData.readiness || !!dayData.morningReadiness || !!dayData.afternoonReadiness;
+    const hasPlace = !!dayData.place || !!dayData.morningPlace || !!dayData.afternoonPlace;
+    const hasLeft = !!dayData.left || !!dayData.morningLeft || !!dayData.afternoonLeft;
+    const hasRight = !!dayData.right || !!dayData.morningRight || !!dayData.afternoonRight;
     const hasFreetext = !!dayData.freetext;
-    return hasStatus || hasReadiness || hasPlace || hasFreetext;
+    return hasStatus || hasReadiness || hasPlace || hasLeft || hasRight || hasFreetext;
   }
 
   return false;
@@ -123,6 +138,7 @@ const typeLabelInput = document.getElementById('typeLabel');
 const typeColorInput = document.getElementById('typeColor');
 const typeColorPicker = document.getElementById('typeColorPicker');
 const typeKindSelect = document.getElementById('typeKind');
+const typeDisplaySelect = document.getElementById('typeDisplay');
 const typeReductionInput = document.getElementById('typeReduction');
 const reductionContainer = document.getElementById('reductionContainer');
 const saveTypeBtn = document.getElementById('saveTypeBtn');
@@ -364,6 +380,15 @@ async function fetchPlanningTypes() {
   const res = await fetch('/api/planning/types');
   planningTypes = await res.json();
 
+  // Ensure default display property
+  planningTypes.forEach(t => {
+    if (!t.display) {
+      if (t.id === 'readiness') t.display = 'left';
+      else if (t.id === 'place') t.display = 'right';
+      else t.display = 'middle';
+    }
+  });
+
   // Update legacy constants
   STATUS_TYPES.length = 0;
   Object.keys(STATUS_LABELS).forEach(key => delete STATUS_LABELS[key]);
@@ -432,18 +457,6 @@ function renderLegend() {
   });
   styleTag.textContent = css;
 
-  // Fixed items
-  const divider = document.createElement('div');
-  divider.style.borderLeft = '1px solid #ccc';
-  divider.style.margin = '0 10px';
-  statusLegend.appendChild(divider);
-
-  const readinessItem = createFixedLegendItem('readiness', 'Readiness', '#d32f2f');
-  statusLegend.appendChild(readinessItem);
-
-  const placeItem = createFixedLegendItem('place', 'Place', '#1976d2');
-  statusLegend.appendChild(placeItem);
-
   // Populate eventTypeFilter dropdown
   const filterSelect = document.getElementById('eventTypeFilter');
   if (filterSelect) {
@@ -475,31 +488,6 @@ function isColorDark(color) {
   return hsp < 150;
 }
 
-function createFixedLegendItem(id, labelText, color) {
-  const item = document.createElement('div');
-  item.className = 'legend-item' + (selectedStatus === id ? ' selected' : '');
-  item.setAttribute('data-status', id);
-
-  const colorBox = document.createElement('div');
-  colorBox.className = 'legend-color';
-  colorBox.style.border = `2px solid ${color}`;
-  colorBox.style.background = '#fff';
-  item.appendChild(colorBox);
-
-  const label = document.createElement('span');
-  label.textContent = labelText;
-  label.style.color = color;
-  label.style.fontWeight = 'bold';
-  item.appendChild(label);
-
-  item.onclick = () => {
-    selectedStatus = id;
-    document.querySelectorAll('.legend-item').forEach(li => li.classList.remove('selected'));
-    item.classList.add('selected');
-  };
-  return item;
-}
-
 function openTypeEditor(type = null) {
   editingTypeId = type ? type.id : null;
   typeEditorTitle.textContent = type ? 'Edit Type' : 'Add New Type';
@@ -509,10 +497,13 @@ function openTypeEditor(type = null) {
   typeColorInput.value = type ? type.color : '#ffffff';
   typeColorPicker.value = type ? (type.color.startsWith('#') ? type.color : '#ffffff') : '#ffffff';
   typeKindSelect.value = type ? type.type : 'absence';
+  if (typeDisplaySelect) {
+    typeDisplaySelect.value = type ? (type.display || 'middle') : 'middle';
+  }
   typeReductionInput.value = type ? (type.reduction !== undefined ? type.reduction : 100) : 100;
 
   reductionContainer.style.display = typeKindSelect.value === 'absence' ? 'block' : 'none';
-  deleteTypeBtn.style.display = type ? 'inline-block' : 'none';
+  deleteTypeBtn.style.display = (type && type.id !== 'none') ? 'inline-block' : 'none';
 
   typeEditorModal.style.display = 'block';
   modalOverlay.style.display = 'block';
@@ -565,6 +556,7 @@ saveTypeBtn.onclick = async () => {
     label: typeLabelInput.value.trim(),
     color: typeColorInput.value.trim() || '#ffffff',
     type: typeKindSelect.value,
+    display: typeDisplaySelect ? typeDisplaySelect.value : 'middle',
     reduction: typeKindSelect.value === 'absence' ? parseInt(typeReductionInput.value) || 0 : 0
   };
 
@@ -589,6 +581,488 @@ async function saveTypes() {
   });
   renderLegend();
   renderPlanning(); // Refresh colors in table
+}
+
+function getTypeObj(typeId) {
+  return planningTypes.find(t => t.id === typeId) || { id: typeId, label: typeId, color: '#ffffff', type: 'information', display: 'middle' };
+}
+
+function hasTypeActive(dayData, typeId, dayPart = 'full') {
+  if (!dayData) return false;
+  if (typeof dayData === 'string') {
+    return dayData === typeId;
+  }
+  const typeObj = getTypeObj(typeId);
+  const display = typeObj.display || 'middle';
+
+  if (display === 'left') {
+    if (typeId === 'readiness') {
+      if (dayPart === 'morning') return dayData.morningReadiness === 'Readiness' || dayData.morningLeft === 'readiness';
+      if (dayPart === 'afternoon') return dayData.afternoonReadiness === 'Readiness' || dayData.afternoonLeft === 'readiness';
+      return (dayData.readiness === 'Readiness' || dayData.left === 'readiness') ||
+             (dayData.morningReadiness === 'Readiness' && dayData.afternoonReadiness === 'Readiness') ||
+             (dayData.morningLeft === 'readiness' && dayData.afternoonLeft === 'readiness');
+    }
+    if (dayPart === 'morning') return dayData.morningLeft === typeId || !!dayData['morning_' + typeId];
+    if (dayPart === 'afternoon') return dayData.afternoonLeft === typeId || !!dayData['afternoon_' + typeId];
+    return (dayData.left === typeId || !!dayData[typeId]) ||
+           (dayData.morningLeft === typeId && dayData.afternoonLeft === typeId);
+  }
+
+  if (display === 'right') {
+    if (typeId === 'place') {
+      if (dayPart === 'morning') return !!dayData.morningPlace || !!dayData.place || dayData.morningRight === 'place';
+      if (dayPart === 'afternoon') return !!dayData.afternoonPlace || !!dayData.place || dayData.afternoonRight === 'place';
+      return !!dayData.place || !!dayData.right || (!!dayData.morningPlace && !!dayData.afternoonPlace);
+    }
+    if (dayPart === 'morning') return dayData.morningRight === typeId || !!dayData['morning_' + typeId];
+    if (dayPart === 'afternoon') return dayData.afternoonRight === typeId || !!dayData['afternoon_' + typeId];
+    return (dayData.right === typeId || !!dayData[typeId]) ||
+           (dayData.morningRight === typeId && dayData.afternoonRight === typeId);
+  }
+
+  // Middle display
+  const { morningStatus, afternoonStatus } = getDayStatuses(dayData);
+  if (typeId === 'freetext') {
+    return dayData.status === 'freetext';
+  }
+  if (dayPart === 'morning') return morningStatus === typeId;
+  if (dayPart === 'afternoon') return afternoonStatus === typeId;
+  return morningStatus === typeId && afternoonStatus === typeId;
+}
+
+function getSidebarInfo(dayData, side) {
+  if (!dayData || typeof dayData !== 'object') {
+    return { morningText: '', afternoonText: '', morningColor: '', afternoonColor: '', morningBg: '', afternoonBg: '' };
+  }
+
+  let morningText = '';
+  let afternoonText = '';
+  let morningType = null;
+  let afternoonType = null;
+
+  if (side === 'left') {
+    if (dayData.morningReadiness) {
+      morningText = dayData.morningReadiness;
+      morningType = getTypeObj('readiness');
+    } else if (dayData.readiness) {
+      morningText = dayData.readiness;
+      morningType = getTypeObj('readiness');
+    }
+    if (dayData.afternoonReadiness) {
+      afternoonText = dayData.afternoonReadiness;
+      afternoonType = getTypeObj('readiness');
+    } else if (dayData.readiness) {
+      afternoonText = dayData.readiness;
+      afternoonType = getTypeObj('readiness');
+    }
+
+    if (dayData.morningLeft) {
+      const t = getTypeObj(dayData.morningLeft);
+      morningText = (dayData['morning_' + dayData.morningLeft] || t.label || dayData.morningLeft);
+      morningType = t;
+    } else if (dayData.left) {
+      const t = getTypeObj(dayData.left);
+      morningText = (dayData[dayData.left] || t.label || dayData.left);
+      morningType = t;
+    }
+
+    if (dayData.afternoonLeft) {
+      const t = getTypeObj(dayData.afternoonLeft);
+      afternoonText = (dayData['afternoon_' + dayData.afternoonLeft] || t.label || dayData.afternoonLeft);
+      afternoonType = t;
+    } else if (dayData.left) {
+      const t = getTypeObj(dayData.left);
+      afternoonText = (dayData[dayData.left] || t.label || dayData.left);
+      afternoonType = t;
+    }
+
+    if (!morningText || !afternoonText) {
+      const leftTypes = planningTypes.filter(tp => tp.display === 'left' && tp.id !== 'readiness');
+      for (const t of leftTypes) {
+        if (!morningText && (dayData['morning_' + t.id] || dayData[t.id])) {
+          morningText = dayData['morning_' + t.id] || dayData[t.id] || t.label || t.id;
+          morningType = t;
+        }
+        if (!afternoonText && (dayData['afternoon_' + t.id] || dayData[t.id])) {
+          afternoonText = dayData['afternoon_' + t.id] || dayData[t.id] || t.label || t.id;
+          afternoonType = t;
+        }
+      }
+    }
+  } else if (side === 'right') {
+    if (dayData.morningPlace) {
+      morningText = dayData.morningPlace;
+      morningType = getTypeObj('place');
+    } else if (dayData.place) {
+      morningText = dayData.place;
+      morningType = getTypeObj('place');
+    }
+    if (dayData.afternoonPlace) {
+      afternoonText = dayData.afternoonPlace;
+      afternoonType = getTypeObj('place');
+    } else if (dayData.place) {
+      afternoonText = dayData.place;
+      afternoonType = getTypeObj('place');
+    }
+
+    if (dayData.morningRight) {
+      const t = getTypeObj(dayData.morningRight);
+      morningText = (dayData['morning_' + dayData.morningRight] || t.label || dayData.morningRight);
+      morningType = t;
+    } else if (dayData.right) {
+      const t = getTypeObj(dayData.right);
+      morningText = (dayData[dayData.right] || t.label || dayData.right);
+      morningType = t;
+    }
+
+    if (dayData.afternoonRight) {
+      const t = getTypeObj(dayData.afternoonRight);
+      afternoonText = (dayData['afternoon_' + dayData.afternoonRight] || t.label || dayData.afternoonRight);
+      afternoonType = t;
+    } else if (dayData.right) {
+      const t = getTypeObj(dayData.right);
+      afternoonText = (dayData[dayData.right] || t.label || dayData.right);
+      afternoonType = t;
+    }
+
+    if (!morningText || !afternoonText) {
+      const rightTypes = planningTypes.filter(tp => tp.display === 'right' && tp.id !== 'place');
+      for (const t of rightTypes) {
+        if (!morningText && (dayData['morning_' + t.id] || dayData[t.id])) {
+          morningText = dayData['morning_' + t.id] || dayData[t.id] || t.label || t.id;
+          morningType = t;
+        }
+        if (!afternoonText && (dayData['afternoon_' + t.id] || dayData[t.id])) {
+          afternoonText = dayData['afternoon_' + t.id] || dayData[t.id] || t.label || t.id;
+          afternoonType = t;
+        }
+      }
+    }
+  }
+
+  const morningColor = (morningType && morningType.color) || (side === 'left' ? '#d32f2f' : '#1976d2');
+  const afternoonColor = (afternoonType && afternoonType.color) || (side === 'left' ? '#d32f2f' : '#1976d2');
+  const morningBg = getLightBgColor(morningColor);
+  const afternoonBg = getLightBgColor(afternoonColor);
+
+  return { morningText, afternoonText, morningColor, afternoonColor, morningBg, afternoonBg };
+}
+
+function renderSidebar(sidebarEl, info, isBold = false) {
+  const { morningText, afternoonText, morningColor, afternoonColor, morningBg, afternoonBg } = info;
+
+  const styleSubDiv = (div, hasText, color, bg) => {
+    div.style.flex = '1 1 0%';
+    div.style.minHeight = '0';
+    div.style.minWidth = '0';
+    div.style.display = 'flex';
+    div.style.alignItems = 'center';
+    div.style.justifyContent = 'center';
+    if (color) div.style.color = color;
+    if (bg) div.style.background = bg;
+    if (isBold) div.style.fontWeight = 'bold';
+    if (hasText) {
+      div.style.writingMode = 'vertical-rl';
+      div.style.textOrientation = 'mixed';
+      div.style.overflow = 'hidden';
+      div.style.whiteSpace = 'nowrap';
+    }
+  };
+
+  if (morningText && afternoonText) {
+    if (morningText === afternoonText && morningColor === afternoonColor) {
+      const fullDiv = document.createElement('div');
+      styleSubDiv(fullDiv, true, morningColor, morningBg);
+      fullDiv.textContent = morningText;
+      sidebarEl.appendChild(fullDiv);
+    } else {
+      const amDiv = document.createElement('div');
+      styleSubDiv(amDiv, true, morningColor, morningBg);
+      amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+      amDiv.textContent = morningText;
+      sidebarEl.appendChild(amDiv);
+
+      const pmDiv = document.createElement('div');
+      styleSubDiv(pmDiv, true, afternoonColor, afternoonBg);
+      pmDiv.textContent = afternoonText;
+      sidebarEl.appendChild(pmDiv);
+    }
+  } else if (morningText) {
+    const amDiv = document.createElement('div');
+    styleSubDiv(amDiv, true, morningColor, morningBg);
+    amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+    amDiv.textContent = morningText;
+    sidebarEl.appendChild(amDiv);
+
+    const pmDiv = document.createElement('div');
+    styleSubDiv(pmDiv, false, null, null);
+    sidebarEl.appendChild(pmDiv);
+  } else if (afternoonText) {
+    const amDiv = document.createElement('div');
+    styleSubDiv(amDiv, false, null, null);
+    amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+    sidebarEl.appendChild(amDiv);
+
+    const pmDiv = document.createElement('div');
+    styleSubDiv(pmDiv, true, afternoonColor, afternoonBg);
+    pmDiv.textContent = afternoonText;
+    sidebarEl.appendChild(pmDiv);
+  } else {
+    sidebarEl.style.border = 'none';
+  }
+}
+
+function applyTypeToDayData(dayData, typeId, dayPart, customVal = null) {
+  const typeObj = getTypeObj(typeId);
+  const display = typeObj.display || 'middle';
+
+  if (display === 'left') {
+    const isDelete = (customVal === null);
+    if (typeId === 'readiness') {
+      const val = isDelete ? null : 'Readiness';
+      if (dayPart === 'morning') {
+        if (val) {
+          dayData.morningReadiness = val;
+          dayData.morningLeft = 'readiness';
+        } else {
+          delete dayData.morningReadiness;
+          delete dayData.morningLeft;
+        }
+        if (dayData.morningReadiness && dayData.afternoonReadiness) {
+          dayData.readiness = 'Readiness';
+          dayData.left = 'readiness';
+        } else {
+          delete dayData.readiness;
+          delete dayData.left;
+        }
+      } else if (dayPart === 'afternoon') {
+        if (val) {
+          dayData.afternoonReadiness = val;
+          dayData.afternoonLeft = 'readiness';
+        } else {
+          delete dayData.afternoonReadiness;
+          delete dayData.afternoonLeft;
+        }
+        if (dayData.morningReadiness && dayData.afternoonReadiness) {
+          dayData.readiness = 'Readiness';
+          dayData.left = 'readiness';
+        } else {
+          delete dayData.readiness;
+          delete dayData.left;
+        }
+      } else {
+        if (val) {
+          dayData.readiness = val;
+          dayData.morningReadiness = val;
+          dayData.afternoonReadiness = val;
+          dayData.left = 'readiness';
+          dayData.morningLeft = 'readiness';
+          dayData.afternoonLeft = 'readiness';
+        } else {
+          delete dayData.readiness;
+          delete dayData.morningReadiness;
+          delete dayData.afternoonReadiness;
+          delete dayData.left;
+          delete dayData.morningLeft;
+          delete dayData.afternoonLeft;
+        }
+      }
+    } else {
+      const val = isDelete ? null : (customVal || typeObj.label || typeId);
+      if (dayPart === 'morning') {
+        if (val) {
+          dayData.morningLeft = typeId;
+          dayData['morning_' + typeId] = val;
+        } else {
+          delete dayData.morningLeft;
+          delete dayData['morning_' + typeId];
+        }
+        if (dayData.morningLeft && dayData.morningLeft === dayData.afternoonLeft) {
+          dayData.left = typeId;
+          dayData[typeId] = val;
+        } else {
+          delete dayData.left;
+          delete dayData[typeId];
+        }
+      } else if (dayPart === 'afternoon') {
+        if (val) {
+          dayData.afternoonLeft = typeId;
+          dayData['afternoon_' + typeId] = val;
+        } else {
+          delete dayData.afternoonLeft;
+          delete dayData['afternoon_' + typeId];
+        }
+        if (dayData.afternoonLeft && dayData.morningLeft === dayData.afternoonLeft) {
+          dayData.left = typeId;
+          dayData[typeId] = val;
+        } else {
+          delete dayData.left;
+          delete dayData[typeId];
+        }
+      } else {
+        if (val) {
+          dayData.left = typeId;
+          dayData.morningLeft = typeId;
+          dayData.afternoonLeft = typeId;
+          dayData[typeId] = val;
+          dayData['morning_' + typeId] = val;
+          dayData['afternoon_' + typeId] = val;
+        } else {
+          delete dayData.left;
+          delete dayData.morningLeft;
+          delete dayData.afternoonLeft;
+          delete dayData[typeId];
+          delete dayData['morning_' + typeId];
+          delete dayData['afternoon_' + typeId];
+        }
+      }
+    }
+  } else if (display === 'right') {
+    if (typeId === 'place') {
+      const isDelete = (!customVal || customVal.trim() === '' || customVal.trim().toLowerCase() === 'none' || customVal.trim().toLowerCase() === 'clear');
+      if (isDelete) {
+        if (dayPart === 'morning') {
+          delete dayData.morningPlace;
+          delete dayData.morningRight;
+          if (dayData.place) {
+            dayData.afternoonPlace = dayData.place;
+            dayData.afternoonRight = dayData.place;
+            delete dayData.place;
+            delete dayData.right;
+          }
+        } else if (dayPart === 'afternoon') {
+          delete dayData.afternoonPlace;
+          delete dayData.afternoonRight;
+          if (dayData.place) {
+            dayData.morningPlace = dayData.place;
+            dayData.morningRight = dayData.place;
+            delete dayData.place;
+            delete dayData.right;
+          }
+        } else {
+          delete dayData.place;
+          delete dayData.morningPlace;
+          delete dayData.afternoonPlace;
+          delete dayData.right;
+          delete dayData.morningRight;
+          delete dayData.afternoonRight;
+        }
+      } else {
+        const cleanVal = customVal.trim();
+        if (dayPart === 'morning') {
+          dayData.morningPlace = cleanVal;
+          dayData.morningRight = cleanVal;
+          if (dayData.afternoonPlace === cleanVal || dayData.afternoonRight === cleanVal) {
+            dayData.place = cleanVal;
+            dayData.right = cleanVal;
+          } else {
+            delete dayData.place;
+            delete dayData.right;
+          }
+        } else if (dayPart === 'afternoon') {
+          dayData.afternoonPlace = cleanVal;
+          dayData.afternoonRight = cleanVal;
+          if (dayData.morningPlace === cleanVal || dayData.morningRight === cleanVal) {
+            dayData.place = cleanVal;
+            dayData.right = cleanVal;
+          } else {
+            delete dayData.place;
+            delete dayData.right;
+          }
+        } else {
+          dayData.place = cleanVal;
+          dayData.morningPlace = cleanVal;
+          dayData.afternoonPlace = cleanVal;
+          dayData.right = cleanVal;
+          dayData.morningRight = cleanVal;
+          dayData.afternoonRight = cleanVal;
+        }
+      }
+    } else {
+      const isDelete = (customVal === null);
+      const val = isDelete ? null : (customVal || typeObj.label || typeId);
+      if (dayPart === 'morning') {
+        if (val) {
+          dayData.morningRight = typeId;
+          dayData['morning_' + typeId] = val;
+        } else {
+          delete dayData.morningRight;
+          delete dayData['morning_' + typeId];
+        }
+        if (dayData.morningRight && dayData.morningRight === dayData.afternoonRight) {
+          dayData.right = typeId;
+          dayData[typeId] = val;
+        } else {
+          delete dayData.right;
+          delete dayData[typeId];
+        }
+      } else if (dayPart === 'afternoon') {
+        if (val) {
+          dayData.afternoonRight = typeId;
+          dayData['afternoon_' + typeId] = val;
+        } else {
+          delete dayData.afternoonRight;
+          delete dayData['afternoon_' + typeId];
+        }
+        if (dayData.afternoonRight && dayData.morningRight === dayData.afternoonRight) {
+          dayData.right = typeId;
+          dayData[typeId] = val;
+        } else {
+          delete dayData.right;
+          delete dayData[typeId];
+        }
+      } else {
+        if (val) {
+          dayData.right = typeId;
+          dayData.morningRight = typeId;
+          dayData.afternoonRight = typeId;
+          dayData[typeId] = val;
+          dayData['morning_' + typeId] = val;
+          dayData['afternoon_' + typeId] = val;
+        } else {
+          delete dayData.right;
+          delete dayData.morningRight;
+          delete dayData.afternoonRight;
+          delete dayData[typeId];
+          delete dayData['morning_' + typeId];
+          delete dayData['afternoon_' + typeId];
+        }
+      }
+    }
+  } else {
+    // Middle display
+    if (typeId === 'freetext') {
+      if (customVal === null) {
+        dayData.status = 'none';
+        delete dayData.freetext;
+        delete dayData.morningStatus;
+        delete dayData.afternoonStatus;
+      } else {
+        dayData.status = 'freetext';
+        dayData.freetext = customVal;
+        delete dayData.morningStatus;
+        delete dayData.afternoonStatus;
+      }
+    } else {
+      const targetVal = customVal !== null ? customVal : typeId;
+      if (dayPart === 'morning') {
+        let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
+        dayData.morningStatus = targetVal;
+        dayData.afternoonStatus = aS;
+        dayData.status = (targetVal === aS) ? targetVal : 'none';
+      } else if (dayPart === 'afternoon') {
+        let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
+        dayData.morningStatus = mS;
+        dayData.afternoonStatus = targetVal;
+        dayData.status = (mS === targetVal) ? mS : 'none';
+      } else {
+        dayData.morningStatus = targetVal;
+        dayData.afternoonStatus = targetVal;
+        dayData.status = targetVal;
+      }
+    }
+  }
 }
 
 fetchPlanningTypes();
@@ -730,6 +1204,9 @@ function renderPlanning() {
         const { morningStatus, afternoonStatus } = getDayStatuses(dayData);
         const status = (typeof dayData === 'object') ? dayData.status : dayData;
         if (status === selectedFilter || morningStatus === selectedFilter || afternoonStatus === selectedFilter) {
+          return true;
+        }
+        if (hasTypeActive(dayData, selectedFilter, 'morning') || hasTypeActive(dayData, selectedFilter, 'afternoon') || hasTypeActive(dayData, selectedFilter, 'full')) {
           return true;
         }
       }
@@ -971,44 +1448,27 @@ function renderPlanning() {
         const mSettings = (currentPlanning.memberSettings && currentPlanning.memberSettings[member]) || { workingDays: [1, 2, 3, 4, 5] };
         days = days.filter(ds => mSettings.workingDays.includes(new Date(ds + 'T00:00:00').getDay()));
         let val = initialValue;
-        if (selectedStatus === 'readiness') {
-          // Check if all members for all these days already have 'Readiness'
-          let allHaveReadiness = true;
-          days.forEach(ds => {
-            if (!currentPlanning.days[ds]) {
-              allHaveReadiness = false;
-              return;
-            }
-            const dD = currentPlanning.days[ds][member];
-            if (!dD || typeof dD !== 'object') {
-              allHaveReadiness = false;
-              return;
-            }
-            if (selectedDayPart === 'morning') {
-              if (dD.morningReadiness !== 'Readiness') allHaveReadiness = false;
-            } else if (selectedDayPart === 'afternoon') {
-              if (dD.afternoonReadiness !== 'Readiness') allHaveReadiness = false;
-            } else {
-              if (dD.readiness !== 'Readiness') allHaveReadiness = false;
-            }
-          });
-          val = allHaveReadiness ? null : 'Readiness';
-        } else if (selectedStatus === 'place' && val === null) {
+
+        const selectedTypeObj = getTypeObj(selectedStatus);
+        const display = selectedTypeObj.display || 'middle';
+
+        if (selectedStatus === 'place' && val === null) {
           val = prompt(`Set Place for ${member} for this week:`, lastPlaceInput);
-          if (val === null) return; // Cancel
+          if (val === null) return;
         } else if (selectedStatus === 'freetext' && val === null) {
           val = prompt(`Enter Free Text for ${member} for this week:`, '');
-          if (val === null) return; // Cancel
+          if (val === null) return;
+        } else if (val === null) {
+          const allHaveIt = days.every(ds => {
+            const dD = currentPlanning.days[ds] && currentPlanning.days[ds][member];
+            return hasTypeActive(dD, selectedStatus, selectedDayPart);
+          });
+          val = allHaveIt ? null : (selectedTypeObj.label || selectedStatus);
         }
 
-        let isDelete = false;
-        let cleanVal = '';
-        if (selectedStatus === 'place') {
-          isDelete = !val || val.trim() === '' || val.trim().toLowerCase() === 'none' || val.trim().toLowerCase() === 'clear';
-          if (!isDelete) {
-            cleanVal = val.trim();
-            setLastPlaceInput(cleanVal);
-          }
+        if (selectedStatus === 'place' && val !== null) {
+          const isDelete = !val || val.trim() === '' || val.trim().toLowerCase() === 'none' || val.trim().toLowerCase() === 'clear';
+          if (!isDelete) setLastPlaceInput(val.trim());
         }
 
         days.forEach(ds => {
@@ -1021,102 +1481,7 @@ function renderPlanning() {
             dayData = { status: dayData || 'none' };
           }
 
-          if (selectedStatus === 'readiness') {
-            if (selectedDayPart === 'morning') {
-              if (val === 'Readiness') {
-                dayData.morningReadiness = val;
-              } else {
-                delete dayData.morningReadiness;
-              }
-              if (dayData.morningReadiness && dayData.afternoonReadiness) {
-                dayData.readiness = 'Readiness';
-              } else {
-                delete dayData.readiness;
-              }
-            } else if (selectedDayPart === 'afternoon') {
-              if (val === 'Readiness') {
-                dayData.afternoonReadiness = val;
-              } else {
-                delete dayData.afternoonReadiness;
-              }
-              if (dayData.morningReadiness && dayData.afternoonReadiness) {
-                dayData.readiness = 'Readiness';
-              } else {
-                delete dayData.readiness;
-              }
-            } else {
-              if (val === 'Readiness') {
-                dayData.readiness = val;
-                dayData.morningReadiness = val;
-                dayData.afternoonReadiness = val;
-              } else {
-                delete dayData.readiness;
-                delete dayData.morningReadiness;
-                delete dayData.afternoonReadiness;
-              }
-            }
-          } else if (selectedStatus === 'place') {
-            if (isDelete) {
-              if (selectedDayPart === 'morning') {
-                delete dayData.morningPlace;
-                if (dayData.place) {
-                  dayData.afternoonPlace = dayData.place;
-                  delete dayData.place;
-                }
-              } else if (selectedDayPart === 'afternoon') {
-                delete dayData.afternoonPlace;
-                if (dayData.place) {
-                  dayData.morningPlace = dayData.place;
-                  delete dayData.place;
-                }
-              } else {
-                delete dayData.place;
-                delete dayData.morningPlace;
-                delete dayData.afternoonPlace;
-              }
-            } else {
-              if (selectedDayPart === 'morning') {
-                dayData.morningPlace = cleanVal;
-                if (dayData.afternoonPlace === cleanVal) {
-                  dayData.place = cleanVal;
-                } else {
-                  delete dayData.place;
-                }
-              } else if (selectedDayPart === 'afternoon') {
-                dayData.afternoonPlace = cleanVal;
-                if (dayData.morningPlace === cleanVal) {
-                  dayData.place = cleanVal;
-                } else {
-                  delete dayData.place;
-                }
-              } else {
-                dayData.place = cleanVal;
-                dayData.morningPlace = cleanVal;
-                dayData.afternoonPlace = cleanVal;
-              }
-            }
-          } else if (selectedStatus === 'freetext') {
-            dayData.status = 'freetext';
-            dayData.freetext = val;
-            delete dayData.morningStatus;
-            delete dayData.afternoonStatus;
-          } else {
-            if (selectedDayPart === 'morning') {
-              let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
-              dayData.morningStatus = selectedStatus;
-              dayData.afternoonStatus = aS;
-              dayData.status = (selectedStatus === aS) ? selectedStatus : 'none';
-            } else if (selectedDayPart === 'afternoon') {
-              let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
-              dayData.morningStatus = mS;
-              dayData.afternoonStatus = selectedStatus;
-              dayData.status = (mS === selectedStatus) ? selectedStatus : 'none';
-            } else {
-              dayData.morningStatus = selectedStatus;
-              dayData.afternoonStatus = selectedStatus;
-              dayData.status = selectedStatus;
-            }
-          }
+          applyTypeToDayData(dayData, selectedStatus, selectedDayPart, val);
           currentPlanning.days[ds][member] = dayData;
         });
       };
@@ -1124,6 +1489,8 @@ function renderPlanning() {
       weekLabelTd.onclick = () => {
         const daysInWeek = getDaysInWeek();
         let bulkVal = null;
+        const selectedTypeObj = getTypeObj(selectedStatus);
+
         if (selectedStatus === 'place') {
           bulkVal = prompt(`Set Place for all members for this week:`, lastPlaceInput);
           if (bulkVal === null) return;
@@ -1134,6 +1501,21 @@ function renderPlanning() {
         } else if (selectedStatus === 'freetext') {
           bulkVal = prompt(`Enter Free Text for all members for this week:`, '');
           if (bulkVal === null) return;
+        } else {
+          let allHaveIt = true;
+          for (const mObj of memberListOrdered) {
+            const mSettings = (currentPlanning.memberSettings && currentPlanning.memberSettings[mObj.name]) || { workingDays: [1, 2, 3, 4, 5] };
+            const memberDaysInWeek = daysInWeek.filter(ds => mSettings.workingDays.includes(new Date(ds + 'T00:00:00').getDay()));
+            for (const ds of memberDaysInWeek) {
+              const dD = currentPlanning.days[ds] && currentPlanning.days[ds][mObj.name];
+              if (!hasTypeActive(dD, selectedStatus, selectedDayPart)) {
+                allHaveIt = false;
+                break;
+              }
+            }
+            if (!allHaveIt) break;
+          }
+          bulkVal = allHaveIt ? null : (selectedTypeObj.label || selectedStatus);
         }
 
         // Check if any target cell (on working days) already has an entry
@@ -1206,7 +1588,12 @@ function renderPlanning() {
         if (dayData) {
           const { morningStatus, afternoonStatus } = getDayStatuses(dayData);
           const status = (typeof dayData === 'object') ? dayData.status : dayData;
-          return (status === selectedFilter || morningStatus === selectedFilter || afternoonStatus === selectedFilter);
+          if (status === selectedFilter || morningStatus === selectedFilter || afternoonStatus === selectedFilter) {
+            return true;
+          }
+          if (hasTypeActive(dayData, selectedFilter, 'morning') || hasTypeActive(dayData, selectedFilter, 'afternoon') || hasTypeActive(dayData, selectedFilter, 'full')) {
+            return true;
+          }
         }
         return false;
       });
@@ -1232,18 +1619,11 @@ function renderPlanning() {
     dateTd.onclick = () => {
       if (!currentPlanning.days[dateStr]) currentPlanning.days[dateStr] = {};
 
+      const selectedTypeObj = getTypeObj(selectedStatus);
+      const display = selectedTypeObj.display || 'middle';
+
       let dayVal = null;
-      if (selectedStatus === 'readiness') {
-        // Check if all members already have 'Readiness'
-        const allHaveReadiness = memberListOrdered.every(mO => {
-          const dD = currentPlanning.days[dateStr] && currentPlanning.days[dateStr][mO.name];
-          if (!dD || typeof dD !== 'object') return false;
-          if (selectedDayPart === 'morning') return dD.morningReadiness === 'Readiness';
-          if (selectedDayPart === 'afternoon') return dD.afternoonReadiness === 'Readiness';
-          return dD.readiness === 'Readiness';
-        });
-        dayVal = allHaveReadiness ? null : 'Readiness';
-      } else if (selectedStatus === 'place') {
+      if (selectedStatus === 'place') {
         dayVal = prompt(`Set Place for all members on ${dateStr}:`, lastPlaceInput);
         if (dayVal === null) return;
         const isDelete = !dayVal || dayVal.trim() === '' || dayVal.trim().toLowerCase() === 'none' || dayVal.trim().toLowerCase() === 'clear';
@@ -1253,6 +1633,12 @@ function renderPlanning() {
       } else if (selectedStatus === 'freetext') {
         dayVal = prompt(`Enter Free Text for all members on ${dateStr}:`, '');
         if (dayVal === null) return;
+      } else {
+        const allHaveIt = memberListOrdered.every(mO => {
+          const dD = currentPlanning.days[dateStr] && currentPlanning.days[dateStr][mO.name];
+          return hasTypeActive(dD, selectedStatus, selectedDayPart);
+        });
+        dayVal = allHaveIt ? null : (selectedTypeObj.label || selectedStatus);
       }
 
       // Check if any target cell already has an entry
@@ -1279,138 +1665,7 @@ function renderPlanning() {
           dayData = { status: dayData || 'none' };
         }
 
-        if (selectedStatus === 'readiness') {
-          if (selectedDayPart === 'morning') {
-            if (dayVal === 'Readiness') {
-              dayData.morningReadiness = dayVal;
-            } else {
-              delete dayData.morningReadiness;
-            }
-            if (dayData.morningReadiness && dayData.afternoonReadiness) {
-              dayData.readiness = 'Readiness';
-            } else {
-              delete dayData.readiness;
-            }
-          } else if (selectedDayPart === 'afternoon') {
-            if (dayVal === 'Readiness') {
-              dayData.afternoonReadiness = dayVal;
-            } else {
-              delete dayData.afternoonReadiness;
-            }
-            if (dayData.morningReadiness && dayData.afternoonReadiness) {
-              dayData.readiness = 'Readiness';
-            } else {
-              delete dayData.readiness;
-            }
-          } else {
-            if (dayVal === 'Readiness') {
-              dayData.readiness = dayVal;
-              dayData.morningReadiness = dayVal;
-              dayData.afternoonReadiness = dayVal;
-            } else {
-              delete dayData.readiness;
-              delete dayData.morningReadiness;
-              delete dayData.afternoonReadiness;
-            }
-          }
-        } else if (selectedStatus === 'place') {
-          const isDelete = !dayVal || dayVal.trim() === '' || dayVal.trim().toLowerCase() === 'none' || dayVal.trim().toLowerCase() === 'clear';
-          if (isDelete) {
-            if (selectedDayPart === 'morning') {
-              delete dayData.morningPlace;
-              if (dayData.place) {
-                dayData.afternoonPlace = dayData.place;
-                delete dayData.place;
-              }
-            } else if (selectedDayPart === 'afternoon') {
-              delete dayData.afternoonPlace;
-              if (dayData.place) {
-                dayData.morningPlace = dayData.place;
-                delete dayData.place;
-              }
-            } else {
-              delete dayData.place;
-              delete dayData.morningPlace;
-              delete dayData.afternoonPlace;
-            }
-          } else {
-            const cleanVal = dayVal.trim();
-            if (selectedDayPart === 'morning') {
-              dayData.morningPlace = cleanVal;
-              if (dayData.afternoonPlace === cleanVal) {
-                dayData.place = cleanVal;
-              } else {
-                delete dayData.place;
-              }
-            } else if (selectedDayPart === 'afternoon') {
-              dayData.afternoonPlace = cleanVal;
-              if (dayData.morningPlace === cleanVal) {
-                dayData.place = cleanVal;
-              } else {
-                delete dayData.place;
-              }
-            } else {
-              dayData.place = cleanVal;
-              dayData.morningPlace = cleanVal;
-              dayData.afternoonPlace = cleanVal;
-            }
-          }
-        }else if (selectedStatus === 'freetext') {
-          // Check if all members already have 'freetext'
-          const allSame = memberListOrdered.every(mO => {
-            const dD = currentPlanning.days[dateStr][mO.name] || 'none';
-            const cS = (typeof dD === 'object') ? dD.status : dD;
-            return cS === 'freetext';
-          });
-          if (allSame) {
-            dayData.status = 'none';
-            delete dayData.freetext;
-            delete dayData.morningStatus;
-            delete dayData.afternoonStatus;
-          } else {
-            dayData.status = 'freetext';
-            dayData.freetext = dayVal;
-            delete dayData.morningStatus;
-            delete dayData.afternoonStatus;
-          }
-        } else {
-          if (selectedDayPart === 'morning') {
-            const allSame = memberListOrdered.every(mO => {
-              const dD = (currentPlanning.days[dateStr] && currentPlanning.days[dateStr][mO.name]) || 'none';
-              const { morningStatus: mS } = getDayStatuses(dD);
-              return mS === selectedStatus;
-            });
-            const targetVal = allSame ? 'none' : selectedStatus;
-
-            let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
-            dayData.morningStatus = targetVal;
-            dayData.afternoonStatus = aS;
-            dayData.status = (targetVal === aS) ? targetVal : 'none';
-          } else if (selectedDayPart === 'afternoon') {
-            const allSame = memberListOrdered.every(mO => {
-              const dD = (currentPlanning.days[dateStr] && currentPlanning.days[dateStr][mO.name]) || 'none';
-              const { afternoonStatus: aS } = getDayStatuses(dD);
-              return aS === selectedStatus;
-            });
-            const targetVal = allSame ? 'none' : selectedStatus;
-
-            let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
-            dayData.morningStatus = mS;
-            dayData.afternoonStatus = targetVal;
-            dayData.status = (mS === targetVal) ? mS : 'none';
-          } else {
-            const allSame = memberListOrdered.every(mO => {
-              const dD = (currentPlanning.days[dateStr] && currentPlanning.days[dateStr][mO.name]) || 'none';
-              const { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dD);
-              return mS === selectedStatus && aS === selectedStatus;
-            });
-            const targetVal = allSame ? 'none' : selectedStatus;
-
-            dayData.morningStatus = targetVal;
-            dayData.afternoonStatus = targetVal;
-            dayData.status = targetVal;
-          }
-        }
+        applyTypeToDayData(dayData, selectedStatus, selectedDayPart, dayVal);
         currentPlanning.days[dateStr][member] = dayData;
       });
       renderPlanning();
@@ -1427,13 +1682,16 @@ function renderPlanning() {
       const dayData = (currentPlanning.days[dateStr] && currentPlanning.days[dateStr][member]) || 'none';
       const { morningStatus, afternoonStatus } = getDayStatuses(dayData);
       const status = (typeof dayData === 'object') ? dayData.status : dayData;
-      const readiness = (typeof dayData === 'object') ? dayData.readiness : '';
-      const place = (typeof dayData === 'object') ? dayData.place : '';
+
+      const leftInfo = getSidebarInfo(dayData, 'left');
+      const rightInfo = getSidebarInfo(dayData, 'right');
+      const matchesLeft = hasTypeActive(dayData, selectedFilter, 'morning') || hasTypeActive(dayData, selectedFilter, 'afternoon') || hasTypeActive(dayData, selectedFilter, 'full');
 
       const cellMatchesFilter = (selectedFilter === 'all') ||
                                 (status === selectedFilter) ||
                                 (morningStatus === selectedFilter) ||
-                                (afternoonStatus === selectedFilter);
+                                (afternoonStatus === selectedFilter) ||
+                                matchesLeft;
 
       if (selectedFilter !== 'all' && !cellMatchesFilter) {
         td.className = 'planning-cell status-none';
@@ -1487,78 +1745,18 @@ function renderPlanning() {
         contentDiv.className = 'planning-cell-content';
         td.appendChild(contentDiv);
 
-        // Left Sidebar for Readiness (20%)
+        // Left Sidebar (20%)
         const rSidebar = document.createElement('div');
         rSidebar.className = 'cell-readiness-sidebar';
-        rSidebar.style.background = 'transparent'; // override default background
+        rSidebar.style.background = 'transparent';
         rSidebar.style.writingMode = 'horizontal-tb';
         rSidebar.style.height = '100%';
+        rSidebar.style.minHeight = '0';
+        rSidebar.style.minWidth = '0';
         rSidebar.style.display = 'flex';
         rSidebar.style.flexDirection = 'column';
         rSidebar.style.alignItems = 'stretch';
-
-        const morningReadyText = (typeof dayData === 'object' && dayData.morningReadiness) || (readiness ? 'Readiness' : '');
-        const afternoonReadyText = (typeof dayData === 'object' && dayData.afternoonReadiness) || (readiness ? 'Readiness' : '');
-
-        const styleSubDiv = (div, hasText) => {
-          div.style.flex = '1';
-          div.style.display = 'flex';
-          div.style.alignItems = 'center';
-          div.style.justifyContent = 'center';
-          if (hasText) {
-            div.style.writingMode = 'vertical-rl';
-            div.style.textOrientation = 'mixed';
-            div.style.overflow = 'hidden';
-            div.style.whiteSpace = 'nowrap';
-          }
-        };
-
-        if (morningReadyText && afternoonReadyText) {
-          if (morningReadyText === afternoonReadyText) {
-            const fullDiv = document.createElement('div');
-            styleSubDiv(fullDiv, true);
-            fullDiv.style.background = '#ffebee';
-            fullDiv.textContent = morningReadyText;
-            rSidebar.appendChild(fullDiv);
-          } else {
-            const amDiv = document.createElement('div');
-            styleSubDiv(amDiv, true);
-            amDiv.style.background = '#ffebee';
-            amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-            amDiv.textContent = morningReadyText;
-            rSidebar.appendChild(amDiv);
-
-            const pmDiv = document.createElement('div');
-            styleSubDiv(pmDiv, true);
-            pmDiv.style.background = '#ffebee';
-            pmDiv.textContent = afternoonReadyText;
-            rSidebar.appendChild(pmDiv);
-          }
-        } else if (morningReadyText) {
-          const amDiv = document.createElement('div');
-          styleSubDiv(amDiv, true);
-          amDiv.style.background = '#ffebee';
-          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-          amDiv.textContent = morningReadyText;
-          rSidebar.appendChild(amDiv);
-
-          const pmDiv = document.createElement('div');
-          styleSubDiv(pmDiv, false);
-          rSidebar.appendChild(pmDiv);
-        } else if (afternoonReadyText) {
-          const amDiv = document.createElement('div');
-          styleSubDiv(amDiv, false);
-          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-          rSidebar.appendChild(amDiv);
-
-          const pmDiv = document.createElement('div');
-          styleSubDiv(pmDiv, true);
-          pmDiv.style.background = '#ffebee';
-          pmDiv.textContent = afternoonReadyText;
-          rSidebar.appendChild(pmDiv);
-        } else {
-          rSidebar.style.border = 'none';
-        }
+        renderSidebar(rSidebar, leftInfo, true);
         contentDiv.appendChild(rSidebar);
 
         // Main Content (60%)
@@ -1591,78 +1789,18 @@ function renderPlanning() {
         }
         contentDiv.appendChild(mainContent);
 
-        // Right Sidebar for Place (20%)
+        // Right Sidebar (20%)
         const pSidebar = document.createElement('div');
         pSidebar.className = 'cell-place-sidebar';
-        pSidebar.style.background = 'transparent'; // override default background
+        pSidebar.style.background = 'transparent';
         pSidebar.style.writingMode = 'horizontal-tb';
         pSidebar.style.height = '100%';
+        pSidebar.style.minHeight = '0';
+        pSidebar.style.minWidth = '0';
         pSidebar.style.display = 'flex';
         pSidebar.style.flexDirection = 'column';
         pSidebar.style.alignItems = 'stretch';
-
-        const morningPlaceText = (typeof dayData === 'object' && dayData.morningPlace) || (place ? place : '');
-        const afternoonPlaceText = (typeof dayData === 'object' && dayData.afternoonPlace) || (place ? place : '');
-
-        const styleSubDivPlace = (div, hasText) => {
-          div.style.flex = '1';
-          div.style.display = 'flex';
-          div.style.alignItems = 'center';
-          div.style.justifyContent = 'center';
-          if (hasText) {
-            div.style.writingMode = 'vertical-rl';
-            div.style.textOrientation = 'mixed';
-            div.style.overflow = 'hidden';
-            div.style.whiteSpace = 'nowrap';
-          }
-        };
-
-        if (morningPlaceText && afternoonPlaceText) {
-          if (morningPlaceText === afternoonPlaceText) {
-            const fullDiv = document.createElement('div');
-            styleSubDivPlace(fullDiv, true);
-            fullDiv.style.background = '#e3f2fd';
-            fullDiv.textContent = morningPlaceText;
-            pSidebar.appendChild(fullDiv);
-          } else {
-            const amDiv = document.createElement('div');
-            styleSubDivPlace(amDiv, true);
-            amDiv.style.background = '#e3f2fd';
-            amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-            amDiv.textContent = morningPlaceText;
-            pSidebar.appendChild(amDiv);
-
-            const pmDiv = document.createElement('div');
-            styleSubDivPlace(pmDiv, true);
-            pmDiv.style.background = '#e3f2fd';
-            pmDiv.textContent = afternoonPlaceText;
-            pSidebar.appendChild(pmDiv);
-          }
-        } else if (morningPlaceText) {
-          const amDiv = document.createElement('div');
-          styleSubDivPlace(amDiv, true);
-          amDiv.style.background = '#e3f2fd';
-          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-          amDiv.textContent = morningPlaceText;
-          pSidebar.appendChild(amDiv);
-
-          const pmDiv = document.createElement('div');
-          styleSubDivPlace(pmDiv, false);
-          pSidebar.appendChild(pmDiv);
-        } else if (afternoonPlaceText) {
-          const amDiv = document.createElement('div');
-          styleSubDivPlace(amDiv, false);
-          amDiv.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-          pSidebar.appendChild(amDiv);
-
-          const pmDiv = document.createElement('div');
-          styleSubDivPlace(pmDiv, true);
-          pmDiv.style.background = '#e3f2fd';
-          pmDiv.textContent = afternoonPlaceText;
-          pSidebar.appendChild(pmDiv);
-        } else {
-          pSidebar.style.border = 'none';
-        }
+        renderSidebar(pSidebar, rightInfo, false);
         contentDiv.appendChild(pSidebar);
       }
 
@@ -1673,131 +1811,49 @@ function renderPlanning() {
           dayData = { status: dayData || 'none' };
         }
 
-        if (selectedStatus === 'readiness') {
-          if (selectedDayPart === 'morning') {
-            if (dayData.morningReadiness === 'Readiness') {
-              delete dayData.morningReadiness;
-            } else {
-              dayData.morningReadiness = 'Readiness';
-            }
-            if (dayData.morningReadiness && dayData.afternoonReadiness) {
-              dayData.readiness = 'Readiness';
-            } else {
-              delete dayData.readiness;
-            }
-          } else if (selectedDayPart === 'afternoon') {
-            if (dayData.afternoonReadiness === 'Readiness') {
-              delete dayData.afternoonReadiness;
-            } else {
-              dayData.afternoonReadiness = 'Readiness';
-            }
-            if (dayData.morningReadiness && dayData.afternoonReadiness) {
-              dayData.readiness = 'Readiness';
-            } else {
-              delete dayData.readiness;
-            }
-          } else {
-            if (dayData.readiness === 'Readiness' || (dayData.morningReadiness && dayData.afternoonReadiness)) {
-              delete dayData.readiness;
-              delete dayData.morningReadiness;
-              delete dayData.afternoonReadiness;
-            } else {
-              dayData.readiness = 'Readiness';
-              dayData.morningReadiness = 'Readiness';
-              dayData.afternoonReadiness = 'Readiness';
-            }
-          }
-        } else if (selectedStatus === 'place') {
-          const currentVal = (selectedDayPart === 'morning') ? (dayData.morningPlace || '') :
-                             (selectedDayPart === 'afternoon') ? (dayData.afternoonPlace || '') :
-                             (dayData.place || '');
+        const selectedTypeObj = getTypeObj(selectedStatus);
+        const display = selectedTypeObj.display || 'middle';
+
+        if (selectedStatus === 'place') {
+          const currentVal = (selectedDayPart === 'morning') ? (dayData.morningPlace || dayData.morningRight || '') :
+                             (selectedDayPart === 'afternoon') ? (dayData.afternoonPlace || dayData.afternoonRight || '') :
+                             (dayData.place || dayData.right || '');
           const val = prompt(`Set Place for ${member} on ${dateStr}:`, currentVal || lastPlaceInput);
           if (val !== null) {
+            applyTypeToDayData(dayData, 'place', selectedDayPart, val);
             const isDelete = !val || val.trim() === '' || val.trim().toLowerCase() === 'none' || val.trim().toLowerCase() === 'clear';
-            if (isDelete) {
-              if (selectedDayPart === 'morning') {
-                delete dayData.morningPlace;
-                if (dayData.place) {
-                  dayData.afternoonPlace = dayData.place;
-                  delete dayData.place;
-                }
-              } else if (selectedDayPart === 'afternoon') {
-                delete dayData.afternoonPlace;
-                if (dayData.place) {
-                  dayData.morningPlace = dayData.place;
-                  delete dayData.place;
-                }
-              } else {
-                delete dayData.place;
-                delete dayData.morningPlace;
-                delete dayData.afternoonPlace;
-              }
-            } else {
-              const cleanVal = val.trim();
-              if (selectedDayPart === 'morning') {
-                dayData.morningPlace = cleanVal;
-                if (dayData.afternoonPlace === cleanVal) {
-                  dayData.place = cleanVal;
-                } else {
-                  delete dayData.place;
-                }
-              } else if (selectedDayPart === 'afternoon') {
-                dayData.afternoonPlace = cleanVal;
-                if (dayData.morningPlace === cleanVal) {
-                  dayData.place = cleanVal;
-                } else {
-                  delete dayData.place;
-                }
-              } else {
-                dayData.place = cleanVal;
-                dayData.morningPlace = cleanVal;
-                dayData.afternoonPlace = cleanVal;
-              }
-              setLastPlaceInput(cleanVal);
-            }
+            if (!isDelete) setLastPlaceInput(val.trim());
           }
         } else if (selectedStatus === 'freetext') {
           const currentStatus = dayData.status || 'none';
           if (currentStatus === 'freetext') {
-            dayData.status = 'none';
-            delete dayData.freetext;
-            delete dayData.morningStatus;
-            delete dayData.afternoonStatus;
+            applyTypeToDayData(dayData, 'freetext', selectedDayPart, null);
           } else {
             const val = prompt(`Enter Free Text for ${member} on ${dateStr}:`, dayData.freetext || '');
             if (val !== null) {
-              dayData.status = 'freetext';
-              dayData.freetext = val;
-              delete dayData.morningStatus;
-              delete dayData.afternoonStatus;
+              applyTypeToDayData(dayData, 'freetext', selectedDayPart, val);
             }
           }
+        } else if (display === 'left' || display === 'right') {
+          const isActive = hasTypeActive(dayData, selectedStatus, selectedDayPart);
+          applyTypeToDayData(dayData, selectedStatus, selectedDayPart, isActive ? null : selectedTypeObj.label || selectedStatus);
         } else {
           if (selectedDayPart === 'morning') {
-            let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
-            const newMorningStatus = (selectedStatus === 'none') ? 'none' : ((mS === selectedStatus) ? 'none' : selectedStatus);
-            dayData.morningStatus = newMorningStatus;
-            dayData.afternoonStatus = aS;
-            dayData.status = (newMorningStatus === aS) ? newMorningStatus : 'none';
+            let { morningStatus: mS } = getDayStatuses(dayData);
+            const targetVal = (selectedStatus === 'none') ? 'none' : ((mS === selectedStatus) ? 'none' : selectedStatus);
+            applyTypeToDayData(dayData, targetVal, 'morning', targetVal);
           } else if (selectedDayPart === 'afternoon') {
-            let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
-            const newAfternoonStatus = (selectedStatus === 'none') ? 'none' : ((aS === selectedStatus) ? 'none' : selectedStatus);
-            dayData.morningStatus = mS;
-            dayData.afternoonStatus = newAfternoonStatus;
-            dayData.status = (mS === newAfternoonStatus) ? mS : 'none';
+            let { afternoonStatus: aS } = getDayStatuses(dayData);
+            const targetVal = (selectedStatus === 'none') ? 'none' : ((aS === selectedStatus) ? 'none' : selectedStatus);
+            applyTypeToDayData(dayData, targetVal, 'afternoon', targetVal);
           } else {
             let { morningStatus: mS, afternoonStatus: aS } = getDayStatuses(dayData);
-            let newStatus = 'none';
+            let targetVal = 'none';
             if (selectedStatus !== 'none') {
-              if (mS === selectedStatus && aS === selectedStatus) {
-                newStatus = 'none';
-              } else {
-                newStatus = selectedStatus;
-              }
+              if (mS === selectedStatus && aS === selectedStatus) targetVal = 'none';
+              else targetVal = selectedStatus;
             }
-            dayData.morningStatus = newStatus;
-            dayData.afternoonStatus = newStatus;
-            dayData.status = newStatus;
+            applyTypeToDayData(dayData, targetVal, 'full', targetVal);
           }
         }
 
@@ -1953,70 +2009,11 @@ document.getElementById('memberImageInput').onchange = async (e) => {
   currentMemberForImage = null;
 };
 
-// Excel Export & Import & Load buttons wiring
+// Load button wiring
 loadBtn.onclick = () => {
   loadPlanning();
 };
 
-exportExcelBtn.onclick = () => {
-  const pi = piNameInput.value.trim();
-  if (!pi) return alert('Enter PI Name first');
-
-  const start = startDateInput.value;
-  const end = endDateInput.value;
-  const filterSelect = document.getElementById('eventTypeFilter');
-  const filterEvent = filterSelect ? filterSelect.value : 'all';
-
-  let url = `/api/planning/export?pi=${encodeURIComponent(pi)}`;
-  if (start) url += `&startDate=${encodeURIComponent(start)}`;
-  if (end) url += `&endDate=${encodeURIComponent(end)}`;
-  if (filterEvent) url += `&filterEvent=${encodeURIComponent(filterEvent)}`;
-
-  window.location.href = url;
-};
-
-importExcelBtn.onclick = () => {
-  const pi = piNameInput.value.trim();
-  if (!pi) return alert('Enter PI Name first');
-  excelFileInput.click();
-};
-
-excelFileInput.onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const pi = piNameInput.value.trim();
-  if (!pi) return alert('Enter PI Name first');
-
-  const formData = new FormData();
-  formData.append('pi', pi);
-  formData.append('file', file);
-
-  statusMsg.innerHTML = '<span class="loading">Importing Excel...</span>';
-  try {
-    const res = await fetch('/api/planning/import', {
-      method: 'POST',
-      body: formData
-    });
-    const data = await res.json();
-    if (res.ok) {
-      currentPlanning = data.updatedPlanning;
-
-      if (currentPlanning.startDate) startDateInput.value = currentPlanning.startDate;
-      if (currentPlanning.endDate) endDateInput.value = currentPlanning.endDate;
-
-      statusMsg.innerHTML = 'Excel imported and saved successfully.';
-      renderPlanning();
-    } else {
-      statusMsg.innerHTML = `<span class="error">${data.error || 'Import failed'}</span>`;
-      alert(data.error || 'Import failed');
-    }
-  } catch (err) {
-    console.error('Import error:', err);
-    statusMsg.innerHTML = '<span class="error">Import error</span>';
-  }
-  e.target.value = ''; // Reset file input
-};
 
 // Load last accessed PI on startup
 window.addEventListener('DOMContentLoaded', async () => {

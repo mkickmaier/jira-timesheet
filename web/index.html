@@ -37,44 +37,63 @@
     .weekend td:first-child { background-color: #eaeaea; }
     .weekend td.status-none { background-color: #eaeaea; }
     .planning-cell.non-working-day.status-none { background-color: #eaeaea; }
-    .planning-cell { cursor: pointer; height: 45px; position: relative; padding: 0 !important; align-items: stretch; }
+    .planning-cell { cursor: pointer; height: 45px; position: relative; padding: 0 !important; }
     .planning-cell:hover { opacity: 0.8; }
 
-    .planning-cell-content { padding: 0 !important; display: flex; align-items: stretch; height: stretch; }
+    .planning-cell-content {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      height: 100%;
+      padding: 0 !important;
+      display: flex;
+      align-items: stretch;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
 
     .cell-readiness-sidebar {
       width: 20%;
-      background: #ffebee;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      background: transparent;
       color: #d32f2f;
       font-weight: bold;
       font-size: 9px;
-      writing-mode: vertical-rl;
-      text-orientation: mixed;
       display: flex;
-      align-items: center;
-      justify-content: center;
+      flex-direction: column;
+      align-items: stretch;
       border-right: 1px solid rgba(0,0,0,0.05);
       overflow: hidden;
       white-space: nowrap;
+      box-sizing: border-box;
     }
     
     .cell-place-sidebar {
       width: 20%;
-      background: #e3f2fd;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      background: transparent;
       color: #1976d2;
       font-size: 9px;
-      writing-mode: vertical-rl;
-      text-orientation: mixed;
       display: flex;
-      align-items: center;
-      justify-content: center;
+      flex-direction: column;
+      align-items: stretch;
       border-left: 1px solid rgba(0,0,0,0.05);
       overflow: hidden;
       white-space: nowrap;
+      box-sizing: border-box;
     }
     
     .cell-main-content {
-      flex: 1;
+      flex: 1 1 0%;
+      min-width: 0;
+      min-height: 0;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -299,9 +318,6 @@
           <input type="text" id="piName" placeholder="PI Name">
           <button id="loadBtn">Load Planning</button>
           <button id="openHistoryBtn" class="btn-secondary" style="margin-left: 5px;">Backups & History</button>
-          <button id="exportExcelBtn" class="btn-secondary" style="margin-left: 5px;">Export Excel</button>
-          <button id="importExcelBtn" class="btn-secondary" style="margin-left: 5px;">Import Excel</button>
-          <input type="file" id="excelFileInput" style="display: none;" accept=".xlsx, .xls">
           <span id="statusMsg" style="margin-left: 10px;"></span>
           <label style="margin-left: 20px;">Start Date:</label>
           <input type="date" id="startDate">
@@ -375,6 +391,14 @@
         <select id="typeKind">
           <option value="absence">Absence (Reduces Capacity)</option>
           <option value="information">Information (Label Only)</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>Display Position:</label>
+        <select id="typeDisplay">
+          <option value="middle">Middle (Main Cell Content)</option>
+          <option value="left">Left (Sidebar)</option>
+          <option value="right">Right (Sidebar)</option>
         </select>
       </div>
       <div id="reductionContainer" class="modal-field">
